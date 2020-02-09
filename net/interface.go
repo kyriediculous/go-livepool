@@ -1,12 +1,14 @@
 package net
 
 import (
+	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/livepeer/m3u8"
 )
 
 type RemoteTranscoderInfo struct {
-	Address  string
-	Capacity int
+	Address         string
+	Capacity        int
+	EthereumAddress ethcommon.Address
 }
 
 type NodeStatus struct {
