@@ -780,7 +780,7 @@ func (rtm *RemoteTranscoderManager) RegisteredTranscodersInfo() []net.RemoteTran
 	rtm.RTmutex.Lock()
 	res := make([]net.RemoteTranscoderInfo, 0, len(rtm.liveTranscoders))
 	for _, transcoder := range rtm.liveTranscoders {
-		res = append(res, net.RemoteTranscoderInfo{Address: transcoder.addr, Capacity: transcoder.capacity, EthereumAddress: transcoder.ethereumAddr})
+		res = append(res, net.RemoteTranscoderInfo{Address: transcoder.addr, Capacity: transcoder.capacity, Load: transcoder.load, EthereumAddress: transcoder.ethereumAddr, Balance: transcoder.Balance()})
 	}
 	rtm.RTmutex.Unlock()
 	return res

@@ -1,6 +1,8 @@
 package net
 
 import (
+	"math/big"
+
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/livepeer/m3u8"
 )
@@ -8,7 +10,9 @@ import (
 type RemoteTranscoderInfo struct {
 	Address         string
 	Capacity        int
+	Load            int
 	EthereumAddress ethcommon.Address
+	Balance         *big.Int
 }
 
 type NodeStatus struct {
