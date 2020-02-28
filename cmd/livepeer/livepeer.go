@@ -251,7 +251,7 @@ func main() {
 	if *orchestrator {
 		n.NodeType = core.OrchestratorNode
 		if !*transcoder {
-			n.TranscoderManager = core.NewRemoteTranscoderManager()
+			n.TranscoderManager = core.NewRemoteTranscoderManager(n.GetBasePrice)
 			n.Transcoder = n.TranscoderManager
 		}
 	} else if *transcoder {

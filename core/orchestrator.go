@@ -627,6 +627,37 @@ type RemoteTranscoder struct {
 	capacity     int
 	load         int
 	ethereumAddr ethcommon.Address
+	*RemoteTranscoderBalance
+}
+
+// RemoteTranscoderBalance Duplicates a Balance type for now that holds the lock
+type RemoteTranscoderBalance struct {
+	pending *big.Int // pending balance (pixels * orchestrator base price)
+	mu      sync.Mutex
+}
+
+func newRemoteTranscoderBalance() *RemoteTranscoderBalance {
+	return &RemoteTranscoderBalance{
+		pending: big.NewInt(0),
+	}
+}
+
+func (b *RemoteTranscoderBalance) Balance() *big.Int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.pending
+}
+
+func (b *RemoteTranscoderBalance) Credit(amount *big.Int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.pending.Add(b.pending, amount)
+}
+
+func (b *RemoteTranscoderBalance) Debit(amount *big.Int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.pending.Sub(b.pending, amount)
 }
 
 // RemoteTranscoderFatalError wraps error to indicate that error is fatal
@@ -690,23 +721,25 @@ func (rt *RemoteTranscoder) Transcode(job string, fname string, profiles []ffmpe
 }
 func NewRemoteTranscoder(m *RemoteTranscoderManager, stream net.Transcoder_RegisterTranscoderServer, capacity int, ethereumAddr ethcommon.Address) *RemoteTranscoder {
 	return &RemoteTranscoder{
-		manager:      m,
-		stream:       stream,
-		eof:          make(chan struct{}, 1),
-		capacity:     capacity,
-		addr:         common.GetConnectionAddr(stream.Context()),
-		ethereumAddr: ethereumAddr,
+		manager:                 m,
+		stream:                  stream,
+		eof:                     make(chan struct{}, 1),
+		capacity:                capacity,
+		addr:                    common.GetConnectionAddr(stream.Context()),
+		ethereumAddr:            ethereumAddr,
+		RemoteTranscoderBalance: newRemoteTranscoderBalance(),
 	}
 }
 
-func NewRemoteTranscoderManager() *RemoteTranscoderManager {
+func NewRemoteTranscoderManager(getBasePrice func() *big.Rat) *RemoteTranscoderManager {
 	return &RemoteTranscoderManager{
 		remoteTranscoders: []*RemoteTranscoder{},
 		liveTranscoders:   map[net.Transcoder_RegisterTranscoderServer]*RemoteTranscoder{},
 		RTmutex:           &sync.Mutex{},
 
-		taskMutex: &sync.RWMutex{},
-		taskChans: make(map[int64]TranscoderChan),
+		taskMutex:    &sync.RWMutex{},
+		taskChans:    make(map[int64]TranscoderChan),
+		getBasePrice: getBasePrice,
 	}
 }
 
@@ -731,6 +764,8 @@ type RemoteTranscoderManager struct {
 	taskMutex *sync.RWMutex
 	taskChans map[int64]TranscoderChan
 	taskCount int64
+
+	getBasePrice func() *big.Rat
 }
 
 // RegisteredTranscodersCount returns number of registered transcoders
@@ -856,6 +891,18 @@ func (rtm *RemoteTranscoderManager) Transcode(job string, fname string, profiles
 		}
 		return rtm.Transcode(job, fname, profiles)
 	}
+
+	if err == nil && rtm.getBasePrice != nil {
+		price := rtm.getBasePrice()
+		if price != nil {
+			fees := new(big.Rat).Mul(price, big.NewRat(res.Pixels, 1)).FloatString(0)
+			feesInt, ok := new(big.Int).SetString(fees, 10)
+			if ok {
+				currentTranscoder.Credit(feesInt)
+			}
+		}
+	}
+
 	rtm.completeTranscoders(currentTranscoder)
 	return res, err
 }
