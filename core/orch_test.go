@@ -71,7 +71,7 @@ func TestCurrentBlock(t *testing.T) {
 
 func TestServeTranscoder(t *testing.T) {
 	n, _ := NewLivepeerNode(nil, "", nil)
-	n.TranscoderManager = NewRemoteTranscoderManager()
+	n.TranscoderManager = NewRemoteTranscoderManager(nil)
 	strm := &StubTranscoderServer{}
 
 	// test that a transcoder was created
@@ -98,7 +98,7 @@ func TestServeTranscoder(t *testing.T) {
 }
 
 func TestRemoteTranscoder(t *testing.T) {
-	m := NewRemoteTranscoderManager()
+	m := NewRemoteTranscoderManager(nil)
 	ethAddr := ethcommon.HexToAddress("foo")
 	initTranscoder := func() (*RemoteTranscoder, *StubTranscoderServer) {
 		strm := &StubTranscoderServer{manager: m}
@@ -173,7 +173,7 @@ func wgWait2(wg *sync.WaitGroup, dur time.Duration) bool {
 }
 
 func TestManageTranscoders(t *testing.T) {
-	m := NewRemoteTranscoderManager()
+	m := NewRemoteTranscoderManager(nil)
 	strm := &StubTranscoderServer{}
 	strm2 := &StubTranscoderServer{manager: m}
 
@@ -237,7 +237,7 @@ func TestManageTranscoders(t *testing.T) {
 }
 
 func TestSelectTranscoder(t *testing.T) {
-	m := NewRemoteTranscoderManager()
+	m := NewRemoteTranscoderManager(nil)
 	strm := &StubTranscoderServer{manager: m, WithholdResults: false}
 	strm2 := &StubTranscoderServer{manager: m}
 
@@ -308,7 +308,10 @@ func TestSelectTranscoder(t *testing.T) {
 }
 
 func TestTranscoderManagerTranscoding(t *testing.T) {
-	m := NewRemoteTranscoderManager()
+	getBasePrice := func() *big.Rat {
+		return big.NewRat(1, 1)
+	}
+	m := NewRemoteTranscoderManager(getBasePrice)
 	s := &StubTranscoderServer{manager: m}
 
 	// sanity checks
@@ -335,6 +338,7 @@ func TestTranscoderManagerTranscoding(t *testing.T) {
 	assert.Nil(err)
 	assert.Len(res.Segments, 1)
 	assert.Equal(string(res.Segments[0].Data), "asdf")
+	assert.Equal(m.remoteTranscoders[0].Balance(), big.NewInt(1000))
 
 	// non-fatal error should not remove from list
 	s.TranscodeError = fmt.Errorf("TranscodeError")
@@ -379,7 +383,7 @@ func TestTranscoderManagerTranscoding(t *testing.T) {
 }
 
 func TestTaskChan(t *testing.T) {
-	n := NewRemoteTranscoderManager()
+	n := NewRemoteTranscoderManager(nil)
 	// Sanity check task ID
 	if n.taskCount != 0 {
 		t.Error("Unexpected taskid")
@@ -459,6 +463,7 @@ type StubTranscoderServer struct {
 func (s *StubTranscoderServer) Send(n *net.NotifySegment) error {
 	res := RemoteTranscoderResult{
 		TranscodeData: &TranscodeData{
+			Pixels: 1000,
 			Segments: []*TranscodedSegmentData{
 				{Data: []byte("asdf")},
 			},
