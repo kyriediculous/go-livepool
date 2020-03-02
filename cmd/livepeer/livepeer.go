@@ -142,6 +142,10 @@ func main() {
 	authWebhookURL := flag.String("authWebhookUrl", "", "RTMP authentication webhook URL")
 	orchWebhookURL := flag.String("orchWebhookUrl", "", "Orchestrator discovery callback URL")
 
+	// Transcoder pool
+	publicTPool := flag.Bool("transcoderPool", false, "Set to true to enable a public transcoder pool")
+	poolCommission := flag.Int("poolCommission", 1, "Commision for the public transcoder pool in percentage points")
+
 	flag.Parse()
 	vFlag.Value.Set(*verbosity)
 
@@ -542,6 +546,17 @@ func main() {
 			rs := eventservices.NewRewardService(n.Eth, blockPollingTime)
 			rs.Start(ctx)
 			defer rs.Stop()
+
+			if *publicTPool {
+				comissionRate := big.NewInt(int64(*poolCommission))
+				n.TranscoderManager = core.NewPublicTranscoderPool(n, timeWatcher.SubscribeRounds, comissionRate)
+				n.Transcoder = n.TranscoderManager
+			}
+			// Start Transcoder Pool payout loop
+			if publicTpool, ok := n.TranscoderManager.(*core.PublicTranscoderPool); ok {
+				go publicTpool.StartPayoutLoop()
+				defer publicTpool.StopPayoutLoop()
+			}
 		}
 
 		if n.NodeType == core.BroadcasterNode {

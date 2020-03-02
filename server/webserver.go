@@ -786,6 +786,33 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 		http.Error(w, "Error getting status", http.StatusInternalServerError)
 	})
 
+	mux.HandleFunc("/poolStats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		pool, ok := s.LivepeerNode.TranscoderManager.(*core.PublicTranscoderPool)
+		if !ok {
+			glog.Errorf("Orchestrator is not running in public transcoder pool mode")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		poolStats := struct {
+			Commission string
+		}{
+			Commission: pool.Commission(),
+		}
+
+		data, err := json.Marshal(poolStats)
+		if err != nil {
+			glog.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
+	})
+
 	mux.HandleFunc("/contractAddresses", func(w http.ResponseWriter, r *http.Request) {
 		if s.LivepeerNode.Eth != nil {
 			addrMap := s.LivepeerNode.Eth.ContractAddresses()
