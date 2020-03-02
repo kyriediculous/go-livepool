@@ -620,7 +620,7 @@ func (rtm *RemoteTranscoderManager) transcoderResults(tcID int64, res *RemoteTra
 }
 
 type RemoteTranscoder struct {
-	manager      *RemoteTranscoderManager
+	manager      TranscoderManager
 	stream       net.Transcoder_RegisterTranscoderServer
 	eof          chan struct{}
 	addr         string
@@ -719,7 +719,7 @@ func (rt *RemoteTranscoder) Transcode(job string, fname string, profiles []ffmpe
 		return chanData.TranscodeData, chanData.Err
 	}
 }
-func NewRemoteTranscoder(m *RemoteTranscoderManager, stream net.Transcoder_RegisterTranscoderServer, capacity int, ethereumAddr ethcommon.Address) *RemoteTranscoder {
+func NewRemoteTranscoder(m TranscoderManager, stream net.Transcoder_RegisterTranscoderServer, capacity int, ethereumAddr ethcommon.Address) *RemoteTranscoder {
 	return &RemoteTranscoder{
 		manager:                 m,
 		stream:                  stream,
