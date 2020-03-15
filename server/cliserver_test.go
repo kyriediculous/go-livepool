@@ -25,7 +25,7 @@ import (
 func newMockServer() *httptest.Server {
 	n, _ := core.NewLivepeerNode(nil, "./tmp", nil)
 	n.NodeType = core.TranscoderNode
-	n.TranscoderManager = core.NewRemoteTranscoderManager(nil)
+	n.TranscoderManager = core.NewRemoteTranscoderManager()
 	strm := &common.StubServerStream{}
 	go func() { n.TranscoderManager.Manage(strm, 5, ethcommon.Address{}) }()
 	time.Sleep(1 * time.Millisecond)
