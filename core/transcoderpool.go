@@ -3,7 +3,9 @@ package core
 import (
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/big"
+	"os"
 	"sort"
 	"sync"
 
@@ -17,6 +19,8 @@ import (
 	"github.com/livepeer/go-livepeer/net"
 	"github.com/livepeer/lpms/ffmpeg"
 )
+
+var errPixelMismatch = errors.New("pixel mismatch")
 
 type TranscoderManager interface {
 	RegisteredTranscodersCount() int
@@ -254,14 +258,7 @@ func (rtm *PublicTranscoderPool) Transcode(job string, fname string, profiles []
 	}
 
 	if err == nil && rtm.getBasePrice != nil {
-		price := rtm.getBasePrice()
-		if price != nil {
-			fees := new(big.Rat).Mul(price, big.NewRat(res.Pixels, 1)).FloatString(0)
-			feesInt, ok := new(big.Int).SetString(fees, 10)
-			if ok {
-				currentTranscoder.Credit(feesInt)
-			}
-		}
+		go rtm.reward(currentTranscoder, res)
 	}
 
 	rtm.completeTranscoders(currentTranscoder)
@@ -307,4 +304,70 @@ func (rtm *PublicTranscoderPool) transcoderResults(tcID int64, res *RemoteTransc
 		return // do we need to return anything?
 	}
 	remoteChan <- res
+}
+
+func (rtm *PublicTranscoderPool) reward(transcoder *RemoteTranscoder, td *TranscodeData) {
+	if err := verifyPixels(td); err != nil {
+		glog.Errorf("pixel verification failed for transcoder=%v", transcoder.ethereumAddr.Hex())
+		return
+	}
+	price := rtm.getBasePrice()
+	if price != nil {
+		fees := new(big.Rat).Mul(price, big.NewRat(td.Pixels, 1))
+		commission := new(big.Rat).Mul(fees, big.NewRat(rtm.commission.Int64(), 10000))
+		feesInt, ok := new(big.Int).SetString(fees.Sub(fees, commission).FloatString(0), 10)
+		if ok {
+			transcoder.Credit(feesInt)
+		}
+	}
+}
+
+func verifyPixels(td *TranscodeData) error {
+	count := int64(0)
+	for i := 0; i < len(td.Segments); i++ {
+		pxls, err := countPixels(td.Segments[i].Data)
+		if err != nil {
+			return err
+		}
+		count += pxls
+	}
+	if count != td.Pixels {
+		return errPixelMismatch
+	}
+	return nil
+}
+
+func countPixels(data []byte) (int64, error) {
+	tempfile, err := ioutil.TempFile("", common.RandName())
+	if err != nil {
+		return 0, fmt.Errorf("error creating temp file for pixels verification: %w", err)
+	}
+	defer os.Remove(tempfile.Name())
+
+	if _, err := tempfile.Write(data); err != nil {
+		tempfile.Close()
+		return 0, fmt.Errorf("error writing temp file for pixels verification: %w", err)
+	}
+
+	if err = tempfile.Close(); err != nil {
+		return 0, fmt.Errorf("error closing temp file for pixels verification: %w", err)
+	}
+
+	fname := tempfile.Name()
+	p, err := pixels(fname)
+	if err != nil {
+		return 0, err
+	}
+
+	return p, nil
+}
+
+func pixels(fname string) (int64, error) {
+	in := &ffmpeg.TranscodeOptionsIn{Fname: fname}
+	res, err := ffmpeg.Transcode3(in, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	return res.Decoded.Pixels, nil
 }
