@@ -54,6 +54,8 @@ func (m *MockClient) TranscoderPool() ([]*lpTypes.Transcoder, error) {
 	return args.Get(0).([]*lpTypes.Transcoder), args.Error(1)
 }
 
+func (m *MockClient) SendEth(amount *big.Int, to ethcommon.Address) error { return nil }
+
 // GetTranscoderPoolMaxSize returns the max size of the active set
 func (m *MockClient) GetTranscoderPoolMaxSize() (*big.Int, error) {
 	args := m.Called()
@@ -335,3 +337,5 @@ func (c *StubClient) SetGasInfo(uint64, *big.Int) error { return nil }
 
 // Faucet
 func (c *StubClient) NextValidRequest(common.Address) (*big.Int, error) { return nil, nil }
+
+func (e *StubClient) SendEth(amount *big.Int, to ethcommon.Address) error { return nil }
