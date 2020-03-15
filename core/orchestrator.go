@@ -734,15 +734,14 @@ func NewRemoteTranscoder(m TranscoderManager, stream net.Transcoder_RegisterTran
 	}
 }
 
-func NewRemoteTranscoderManager(getBasePrice func() *big.Rat) *RemoteTranscoderManager {
+func NewRemoteTranscoderManager() *RemoteTranscoderManager {
 	return &RemoteTranscoderManager{
 		remoteTranscoders: []*RemoteTranscoder{},
 		liveTranscoders:   map[net.Transcoder_RegisterTranscoderServer]*RemoteTranscoder{},
 		RTmutex:           &sync.Mutex{},
 
-		taskMutex:    &sync.RWMutex{},
-		taskChans:    make(map[int64]TranscoderChan),
-		getBasePrice: getBasePrice,
+		taskMutex: &sync.RWMutex{},
+		taskChans: make(map[int64]TranscoderChan),
 	}
 }
 
@@ -767,8 +766,6 @@ type RemoteTranscoderManager struct {
 	taskMutex *sync.RWMutex
 	taskChans map[int64]TranscoderChan
 	taskCount int64
-
-	getBasePrice func() *big.Rat
 }
 
 // RegisteredTranscodersCount returns number of registered transcoders
@@ -783,7 +780,7 @@ func (rtm *RemoteTranscoderManager) RegisteredTranscodersInfo() []net.RemoteTran
 	rtm.RTmutex.Lock()
 	res := make([]net.RemoteTranscoderInfo, 0, len(rtm.liveTranscoders))
 	for _, transcoder := range rtm.liveTranscoders {
-		res = append(res, net.RemoteTranscoderInfo{Address: transcoder.addr, Capacity: transcoder.capacity, Load: transcoder.load, EthereumAddress: transcoder.ethereumAddr, Balance: transcoder.Balance()})
+		res = append(res, net.RemoteTranscoderInfo{Address: transcoder.addr, Capacity: transcoder.capacity})
 	}
 	rtm.RTmutex.Unlock()
 	return res
@@ -894,18 +891,6 @@ func (rtm *RemoteTranscoderManager) Transcode(job string, fname string, profiles
 		}
 		return rtm.Transcode(job, fname, profiles)
 	}
-
-	if err == nil && rtm.getBasePrice != nil {
-		price := rtm.getBasePrice()
-		if price != nil {
-			fees := new(big.Rat).Mul(price, big.NewRat(res.Pixels, 1)).FloatString(0)
-			feesInt, ok := new(big.Int).SetString(fees, 10)
-			if ok {
-				currentTranscoder.Credit(feesInt)
-			}
-		}
-	}
-
 	rtm.completeTranscoders(currentTranscoder)
 	return res, err
 }

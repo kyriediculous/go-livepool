@@ -775,6 +775,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 	})
 
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		status := s.GetNodeStatus()
 		if status != nil {
 			if data, err := json.Marshal(status); err == nil {

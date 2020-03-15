@@ -261,7 +261,7 @@ func main() {
 	if *orchestrator {
 		n.NodeType = core.OrchestratorNode
 		if !*transcoder {
-			n.TranscoderManager = core.NewRemoteTranscoderManager(n.GetBasePrice)
+			n.TranscoderManager = core.NewRemoteTranscoderManager()
 			n.Transcoder = n.TranscoderManager
 		}
 	} else if *transcoder {
@@ -414,14 +414,14 @@ func main() {
 
 		timeWatcher, err = watchers.NewTimeWatcher(addrMap["RoundsManager"], blockWatcher, n.Eth)
 		if err != nil {
-			glog.Errorf("Failed to setup roundswatcher: %v", err)
+			glog.Errorf("Failed to setup timeWatcher: %v", err)
 			return
 		}
 
 		timeWatcherErr := make(chan error, 1)
 		go func() {
 			if err := timeWatcher.Watch(); err != nil {
-				timeWatcherErr <- fmt.Errorf("roundswatcher failed to start watching for events: %v", err)
+				timeWatcherErr <- fmt.Errorf("timeWatcher failed to start watching for events: %v", err)
 			}
 		}()
 		defer timeWatcher.Stop()

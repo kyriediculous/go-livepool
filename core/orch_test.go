@@ -72,7 +72,7 @@ func TestCurrentBlock(t *testing.T) {
 func TestServeTranscoder(t *testing.T) {
 	assert := assert.New(t)
 	n, _ := NewLivepeerNode(nil, "", nil)
-	n.TranscoderManager = NewRemoteTranscoderManager(nil)
+	n.TranscoderManager = NewRemoteTranscoderManager()
 	strm := &StubTranscoderServer{}
 
 	// test that a transcoder was created
@@ -96,7 +96,7 @@ func TestServeTranscoder(t *testing.T) {
 }
 
 func TestRemoteTranscoder(t *testing.T) {
-	m := NewRemoteTranscoderManager(nil)
+	m := NewRemoteTranscoderManager()
 	ethAddr := ethcommon.HexToAddress("foo")
 	initTranscoder := func() (*RemoteTranscoder, *StubTranscoderServer) {
 		strm := &StubTranscoderServer{manager: m}
@@ -171,7 +171,7 @@ func wgWait2(wg *sync.WaitGroup, dur time.Duration) bool {
 }
 
 func TestManageTranscoders(t *testing.T) {
-	m := NewRemoteTranscoderManager(nil)
+	m := NewRemoteTranscoderManager()
 	strm := &StubTranscoderServer{}
 	strm2 := &StubTranscoderServer{manager: m}
 
@@ -235,7 +235,7 @@ func TestManageTranscoders(t *testing.T) {
 }
 
 func TestSelectTranscoder(t *testing.T) {
-	m := NewRemoteTranscoderManager(nil)
+	m := NewRemoteTranscoderManager()
 	strm := &StubTranscoderServer{manager: m, WithholdResults: false}
 	strm2 := &StubTranscoderServer{manager: m}
 
@@ -306,10 +306,7 @@ func TestSelectTranscoder(t *testing.T) {
 }
 
 func TestTranscoderManagerTranscoding(t *testing.T) {
-	getBasePrice := func() *big.Rat {
-		return big.NewRat(1, 1)
-	}
-	m := NewRemoteTranscoderManager(getBasePrice)
+	m := NewRemoteTranscoderManager()
 	s := &StubTranscoderServer{manager: m}
 
 	// sanity checks
@@ -381,7 +378,7 @@ func TestTranscoderManagerTranscoding(t *testing.T) {
 }
 
 func TestTaskChan(t *testing.T) {
-	n := NewRemoteTranscoderManager(nil)
+	n := NewRemoteTranscoderManager()
 	// Sanity check task ID
 	if n.taskCount != 0 {
 		t.Error("Unexpected taskid")
