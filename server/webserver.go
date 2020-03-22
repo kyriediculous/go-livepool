@@ -24,6 +24,7 @@ import (
 	"github.com/livepeer/go-livepeer/eth"
 	lpTypes "github.com/livepeer/go-livepeer/eth/types"
 	"github.com/livepeer/go-livepeer/monitor"
+	"github.com/livepeer/go-livepeer/net"
 	ffmpeg "github.com/livepeer/lpms/ffmpeg"
 )
 
@@ -797,10 +798,23 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 			return
 		}
 
+		totalPayouts, err := pool.TotalPayouts()
+		if err != nil {
+			glog.Error("unable to get total pool payout")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 		poolStats := struct {
-			Commission string
+			Commission   string
+			Version      string
+			BasePrice    string
+			TotalPayouts string
 		}{
-			Commission: pool.Commission(),
+			Commission:   pool.Commission(),
+			Version:      core.LivepeerVersion,
+			BasePrice:    s.LivepeerNode.GetBasePrice().FloatString(0),
+			TotalPayouts: totalPayouts.String(),
 		}
 
 		data, err := json.Marshal(poolStats)
@@ -812,6 +826,21 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(data)
+	})
+
+	mux.HandleFunc("/transcoders", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+
+		var transcoders []*net.RemoteTranscoderInfo
+		if s.LivepeerNode.TranscoderManager != nil {
+			transcoders = s.LivepeerNode.TranscoderManager.RegisteredTranscodersInfo()
+		}
+		if data, err := json.Marshal(transcoders); err == nil {
+			w.Write(data)
+			return
+		}
+		http.Error(w, "Error getting transcoders", http.StatusInternalServerError)
 	})
 
 	mux.HandleFunc("/contractAddresses", func(w http.ResponseWriter, r *http.Request) {

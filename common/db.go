@@ -37,6 +37,8 @@ type DB struct {
 	findLatestMiniHeader             *sql.Stmt
 	findAllMiniHeadersSortedByNumber *sql.Stmt
 	deleteMiniHeader                 *sql.Stmt
+
+	updateRemoteTranscoder *sql.Stmt
 }
 
 // DBOrch is the type binding for a row result from the orchestrators table
@@ -62,6 +64,12 @@ type DBOrchFilter struct {
 	MaxPrice     *big.Rat
 	CurrentRound *big.Int
 	Addresses    []ethcommon.Address
+}
+
+type DBRemoteT struct {
+	Address ethcommon.Address
+	Pending *big.Int
+	Payout  *big.Int
 }
 
 var LivepeerDBVersion = 1
@@ -122,6 +130,12 @@ var schema = `
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_blockheaders_number ON blockheaders(number);
+
+	CREATE TABLE IF NOT EXISTS remoteTranscoders (
+		address STRING PRIMARY KEY,
+		pending STRING,
+		payout STRING
+	);
 `
 
 func NewDBOrch(ethereumAddr string, serviceURI string, pricePerPixel int64, activationRound int64, deactivationRound int64, stake int64) *DBOrch {
@@ -196,6 +210,27 @@ func InitDB(dbPath string) (*DB, error) {
 		return nil, err
 	}
 	d.updateKV = stmt
+
+	// update remoteT statement
+	stmt, err = db.Prepare(`
+	INSERT INTO remoteTranscoders(address, pending, payout)
+	VALUES(:address, :pending, :payout)
+	ON CONFLICT(address) DO UPDATE SET
+	pending = 
+		CASE WHEN excluded.pending == ""
+		THEN remoteTranscoders.pending
+		ELSE excluded.pending END,
+	payout = 
+		CASE WHEN excluded.payout == ""
+		THEN remoteTranscoders.payout
+		ELSE excluded.payout END
+	`)
+	if err != nil {
+		glog.Error("Unable to prepare updateRemoteTranscoder err=", err)
+		d.Close()
+		return nil, err
+	}
+	d.updateRemoteTranscoder = stmt
 
 	// updateOrch prepared statement
 	stmt, err = db.Prepare(`
@@ -358,6 +393,11 @@ func (db *DB) Close() {
 	if db.deleteMiniHeader != nil {
 		db.deleteMiniHeader.Close()
 	}
+
+	if db.updateRemoteTranscoder != nil {
+		db.updateRemoteTranscoder.Close()
+	}
+
 	if db.dbh != nil {
 		db.dbh.Close()
 	}
@@ -399,6 +439,29 @@ func (db *DB) SetChainID(id *big.Int) error {
 		return err
 	}
 	return nil
+}
+
+func (db *DB) GetPoolPayout() (*big.Int, error) {
+	payS, err := db.selectKVStore("totalPoolPayout")
+	if err != nil {
+		return nil, err
+	}
+	if payS == "" {
+		return big.NewInt(0), nil
+	}
+	pay, ok := new(big.Int).SetString(payS, 10)
+	if !ok {
+		return nil, fmt.Errorf("unable to convert payout to big.Int")
+	}
+	return pay, nil
+}
+
+func (db *DB) IncreasePoolPayout(payout *big.Int) error {
+	currPay, err := db.GetPoolPayout()
+	if err != nil {
+		return err
+	}
+	return db.updateKVStore("totalPoolPayout", currPay.Add(currPay, payout).String())
 }
 
 func (db *DB) selectKVStore(key string) (string, error) {
@@ -819,4 +882,67 @@ func decodeLogsJSON(logsEnc []byte) ([]types.Log, error) {
 		return []types.Log{}, err
 	}
 	return logs, nil
+}
+
+func (db *DB) SelectRemoteTranscoder(address ethcommon.Address) (*DBRemoteT, error) {
+	if db == nil {
+		return nil, nil
+	}
+
+	qry := fmt.Sprintf("SELECT pending, payout FROM remoteTranscoders WHERE address='%x'", address)
+	row := db.dbh.QueryRow(qry)
+	var (
+		pendingS string
+		payoutS  string
+	)
+	if err := row.Scan(&pendingS, &payoutS); err != nil {
+		return nil, err
+	}
+
+	pending := big.NewInt(0)
+	if pendingS != "" {
+		pending, _ = new(big.Int).SetString(pendingS, 10)
+	}
+
+	payout := big.NewInt(0)
+	if payoutS != "" {
+		payout, _ = new(big.Int).SetString(payoutS, 10)
+	}
+
+	return &DBRemoteT{
+		address,
+		pending,
+		payout,
+	}, nil
+}
+
+func (db *DB) UpdateRemoteTranscoder(rt *DBRemoteT) error {
+	if db == nil || rt == nil {
+		return nil
+	}
+
+	var (
+		pending string
+		payout  string
+	)
+
+	if rt.Pending != nil {
+		pending = rt.Pending.String()
+	}
+
+	if rt.Payout != nil {
+		payout = rt.Payout.String()
+	}
+
+	_, err := db.updateRemoteTranscoder.Exec(
+		sql.Named("address", fmt.Sprintf("%x", rt.Address)),
+		sql.Named("pending", pending),
+		sql.Named("payout", payout),
+	)
+
+	if err != nil {
+		glog.Error("Unable to update remote transcoder err=", err)
+	}
+
+	return err
 }
