@@ -630,37 +630,6 @@ type RemoteTranscoder struct {
 	capacity     int
 	load         int
 	ethereumAddr ethcommon.Address
-	*RemoteTranscoderBalance
-}
-
-// RemoteTranscoderBalance Duplicates a Balance type for now that holds the lock
-type RemoteTranscoderBalance struct {
-	pending *big.Int // pending balance (pixels * orchestrator base price)
-	mu      sync.Mutex
-}
-
-func newRemoteTranscoderBalance() *RemoteTranscoderBalance {
-	return &RemoteTranscoderBalance{
-		pending: big.NewInt(0),
-	}
-}
-
-func (b *RemoteTranscoderBalance) Balance() *big.Int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.pending
-}
-
-func (b *RemoteTranscoderBalance) Credit(amount *big.Int) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.pending.Add(b.pending, amount)
-}
-
-func (b *RemoteTranscoderBalance) Debit(amount *big.Int) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.pending.Sub(b.pending, amount)
 }
 
 // RemoteTranscoderFatalError wraps error to indicate that error is fatal
@@ -724,13 +693,12 @@ func (rt *RemoteTranscoder) Transcode(job string, fname string, profiles []ffmpe
 }
 func NewRemoteTranscoder(m TranscoderManager, stream net.Transcoder_RegisterTranscoderServer, capacity int, ethereumAddr ethcommon.Address) *RemoteTranscoder {
 	return &RemoteTranscoder{
-		manager:                 m,
-		stream:                  stream,
-		eof:                     make(chan struct{}, 1),
-		capacity:                capacity,
-		addr:                    common.GetConnectionAddr(stream.Context()),
-		ethereumAddr:            ethereumAddr,
-		RemoteTranscoderBalance: newRemoteTranscoderBalance(),
+		manager:      m,
+		stream:       stream,
+		eof:          make(chan struct{}, 1),
+		capacity:     capacity,
+		addr:         common.GetConnectionAddr(stream.Context()),
+		ethereumAddr: ethereumAddr,
 	}
 }
 
@@ -776,11 +744,11 @@ func (rtm *RemoteTranscoderManager) RegisteredTranscodersCount() int {
 }
 
 // RegisteredTranscodersInfo returns list of restered transcoder's information
-func (rtm *RemoteTranscoderManager) RegisteredTranscodersInfo() []net.RemoteTranscoderInfo {
+func (rtm *RemoteTranscoderManager) RegisteredTranscodersInfo() []*net.RemoteTranscoderInfo {
 	rtm.RTmutex.Lock()
-	res := make([]net.RemoteTranscoderInfo, 0, len(rtm.liveTranscoders))
+	res := make([]*net.RemoteTranscoderInfo, 0, len(rtm.liveTranscoders))
 	for _, transcoder := range rtm.liveTranscoders {
-		res = append(res, net.RemoteTranscoderInfo{Address: transcoder.addr, Capacity: transcoder.capacity})
+		res = append(res, &net.RemoteTranscoderInfo{Address: transcoder.addr, Capacity: transcoder.capacity})
 	}
 	rtm.RTmutex.Unlock()
 	return res

@@ -12,7 +12,8 @@ type RemoteTranscoderInfo struct {
 	Capacity        int
 	Load            int
 	EthereumAddress ethcommon.Address
-	Balance         *big.Int
+	Pending         *big.Int
+	Payout          *big.Int
 }
 
 type NodeStatus struct {
@@ -23,7 +24,7 @@ type NodeStatus struct {
 	GOArch                      string
 	GOOS                        string
 	RegisteredTranscodersNumber int
-	RegisteredTranscoders       []RemoteTranscoderInfo
+	RegisteredTranscoders       []*RemoteTranscoderInfo
 	LocalTranscoding            bool // Indicates orchestrator that is also transcoder
 	// xxx add transcoder's version here
 }

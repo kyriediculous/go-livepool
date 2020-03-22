@@ -24,7 +24,7 @@ var errPixelMismatch = errors.New("pixel mismatch")
 
 type TranscoderManager interface {
 	RegisteredTranscodersCount() int
-	RegisteredTranscodersInfo() []net.RemoteTranscoderInfo
+	RegisteredTranscodersInfo() []*net.RemoteTranscoderInfo
 	Manage(stream net.Transcoder_RegisterTranscoderServer, capacity int, ethereumAddr ethcommon.Address)
 	Transcode(job string, fname string, profiles []ffmpeg.VideoProfile) (*TranscodeData, error)
 
@@ -36,6 +36,13 @@ type TranscoderManager interface {
 	removeTaskChan(taskID int64)
 
 	transcoderResults(tcID int64, res *RemoteTranscoderResult)
+}
+
+type RemoteTranscoderStore interface {
+	UpdateRemoteTranscoder(*common.DBRemoteT) error
+	SelectRemoteTranscoder(address ethcommon.Address) (*common.DBRemoteT, error)
+	IncreasePoolPayout(payout *big.Int) error
+	GetPoolPayout() (*big.Int, error)
 }
 
 type PublicTranscoderPool struct {
@@ -56,6 +63,8 @@ type PublicTranscoderPool struct {
 	eth      eth.LivepeerEthClient
 
 	quit chan struct{}
+
+	remoteTStore RemoteTranscoderStore
 }
 
 func NewPublicTranscoderPool(n *LivepeerNode, roundSub func(sink chan<- types.Log) event.Subscription, commission *big.Int) *PublicTranscoderPool {
@@ -74,11 +83,17 @@ func NewPublicTranscoderPool(n *LivepeerNode, roundSub func(sink chan<- types.Lo
 		commission: commission,
 
 		quit: make(chan struct{}),
+
+		remoteTStore: n.Database,
 	}
 }
 
 func (rtm *PublicTranscoderPool) Commission() string {
 	return big.NewRat(rtm.commission.Int64(), 100).FloatString(2)
+}
+
+func (rtm *PublicTranscoderPool) TotalPayouts() (*big.Int, error) {
+	return rtm.remoteTStore.GetPoolPayout()
 }
 
 // StartPayoutLoop starts the PublicTranscoderPool payout loop
@@ -115,22 +130,30 @@ func (rtm *PublicTranscoderPool) payout() {
 }
 
 func (rtm *PublicTranscoderPool) payoutTranscoder(t *RemoteTranscoder) error {
-	bal := t.Balance()
-	if bal == nil || bal.Cmp(big.NewInt(0)) <= 0 {
-		return nil
-	}
-	var balAfterFees *big.Int
-	if rtm.commission == nil || rtm.commission.Int64() <= 0 { // this will never be nil if we properly set it on node startup
-		balAfterFees = bal
-	} else {
-		balAfterFees = new(big.Int).Div(new(big.Int).Mul(bal, rtm.commission), big.NewInt(100))
-	}
-	err := rtm.eth.SendEth(balAfterFees, t.ethereumAddr)
+	rt, err := rtm.remoteTStore.SelectRemoteTranscoder(t.ethereumAddr)
 	if err != nil {
 		return err
 	}
-	t.Debit(bal)
-	return nil
+	bal := rt.Pending
+	if bal == nil || bal.Cmp(big.NewInt(0)) <= 0 {
+		return nil
+	}
+
+	err = rtm.eth.SendEth(bal, t.ethereumAddr)
+	if err != nil {
+		return err
+	}
+
+	if err := rtm.remoteTStore.UpdateRemoteTranscoder(&common.DBRemoteT{
+		Address: t.ethereumAddr,
+		Pending: big.NewInt(0),
+		Payout:  new(big.Int).Add(rt.Payout, bal),
+	}); err != nil {
+		glog.Error(err)
+		return err
+	}
+
+	return rtm.remoteTStore.IncreasePoolPayout(bal)
 }
 
 // RegisteredTranscodersCount returns number of registered transcoders
@@ -141,11 +164,23 @@ func (rtm *PublicTranscoderPool) RegisteredTranscodersCount() int {
 }
 
 // RegisteredTranscodersInfo returns list of restered transcoder's information
-func (rtm *PublicTranscoderPool) RegisteredTranscodersInfo() []net.RemoteTranscoderInfo {
+func (rtm *PublicTranscoderPool) RegisteredTranscodersInfo() []*net.RemoteTranscoderInfo {
 	rtm.RTmutex.Lock()
-	res := make([]net.RemoteTranscoderInfo, 0, len(rtm.liveTranscoders))
+	res := make([]*net.RemoteTranscoderInfo, 0, len(rtm.liveTranscoders))
 	for _, transcoder := range rtm.liveTranscoders {
-		res = append(res, net.RemoteTranscoderInfo{Address: transcoder.addr, Capacity: transcoder.capacity, Load: transcoder.load, EthereumAddress: transcoder.ethereumAddr, Balance: transcoder.Balance()})
+		dbT, err := rtm.remoteTStore.SelectRemoteTranscoder(transcoder.ethereumAddr)
+		if err != nil {
+			glog.Error(err)
+			continue
+		}
+		res = append(res, &net.RemoteTranscoderInfo{
+			Address:         transcoder.addr,
+			Capacity:        transcoder.capacity,
+			Load:            transcoder.load,
+			EthereumAddress: transcoder.ethereumAddr,
+			Pending:         dbT.Pending,
+			Payout:          dbT.Payout,
+		})
 	}
 	rtm.RTmutex.Unlock()
 	return res
@@ -155,6 +190,9 @@ func (rtm *PublicTranscoderPool) RegisteredTranscodersInfo() []net.RemoteTransco
 func (rtm *PublicTranscoderPool) Manage(stream net.Transcoder_RegisterTranscoderServer, capacity int, ethereumAddr ethcommon.Address) {
 	from := common.GetConnectionAddr(stream.Context())
 	transcoder := NewRemoteTranscoder(rtm, stream, capacity, ethereumAddr)
+	if err := rtm.remoteTStore.UpdateRemoteTranscoder(&common.DBRemoteT{Address: ethereumAddr}); err != nil {
+		glog.Error(err)
+	}
 	go func() {
 		ctx := stream.Context()
 		<-ctx.Done()
@@ -306,20 +344,26 @@ func (rtm *PublicTranscoderPool) transcoderResults(tcID int64, res *RemoteTransc
 	remoteChan <- res
 }
 
-func (rtm *PublicTranscoderPool) reward(transcoder *RemoteTranscoder, td *TranscodeData) {
+func (rtm *PublicTranscoderPool) reward(transcoder *RemoteTranscoder, td *TranscodeData) error {
 	if err := verifyPixels(td); err != nil {
 		glog.Errorf("pixel verification failed for transcoder=%v", transcoder.ethereumAddr.Hex())
-		return
+		return err
+	}
+	t, err := rtm.remoteTStore.SelectRemoteTranscoder(transcoder.ethereumAddr)
+	if err != nil {
+		return err
 	}
 	price := rtm.getBasePrice()
-	if price != nil {
-		fees := new(big.Rat).Mul(price, big.NewRat(td.Pixels, 1))
-		commission := new(big.Rat).Mul(fees, big.NewRat(rtm.commission.Int64(), 10000))
-		feesInt, ok := new(big.Int).SetString(fees.Sub(fees, commission).FloatString(0), 10)
-		if ok {
-			transcoder.Credit(feesInt)
-		}
+	fees := new(big.Rat).Mul(price, big.NewRat(td.Pixels, 1))
+	commission := new(big.Rat).Mul(fees, big.NewRat(rtm.commission.Int64(), 10000))
+	feesInt, ok := new(big.Int).SetString(fees.Sub(fees, commission).FloatString(0), 10)
+	if !ok {
+		return errors.New("error calculating fees")
 	}
+	return rtm.remoteTStore.UpdateRemoteTranscoder(&common.DBRemoteT{
+		Address: transcoder.ethereumAddr,
+		Pending: new(big.Int).Add(t.Pending, feesInt),
+	})
 }
 
 func verifyPixels(td *TranscodeData) error {
@@ -329,11 +373,12 @@ func verifyPixels(td *TranscodeData) error {
 		if err != nil {
 			return err
 		}
-		count += pxls
+		if pxls != td.Segments[i].Pixels {
+			glog.Error("Pixel mismatch count=%v actual=%v", count, td.Pixels)
+			return errPixelMismatch
+		}
 	}
-	if count != td.Pixels {
-		return errPixelMismatch
-	}
+
 	return nil
 }
 

@@ -779,7 +779,7 @@ func (c *client) SendEth(amount *big.Int, to ethcommon.Address) error {
 	actualAmount := new(big.Int).Sub(amount, txCost)
 
 	// If amount too small , don't pay out and wait for next round
-	if actualAmount.Cmp(new(big.Int).Div(amount, big.NewInt(2))) < 0 {
+	if actualAmount.Cmp(new(big.Int).Mul(txCost, big.NewInt(10))) < 0 {
 		return fmt.Errorf("not enough balance to pay out to justify transaction cost txCost=%v payout=%v", txCost, amount)
 	}
 

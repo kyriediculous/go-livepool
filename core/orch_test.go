@@ -333,7 +333,6 @@ func TestTranscoderManagerTranscoding(t *testing.T) {
 	assert.Nil(err)
 	assert.Len(res.Segments, 1)
 	assert.Equal(string(res.Segments[0].Data), "asdf")
-	assert.Equal(m.remoteTranscoders[0].Balance(), big.NewInt(1000))
 
 	// non-fatal error should not remove from list
 	s.TranscodeError = fmt.Errorf("TranscodeError")
