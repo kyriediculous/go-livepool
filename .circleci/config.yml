@@ -6,14 +6,14 @@ workflows:
     jobs:
       - build-builder
       - build:
+          branches:
+            only:
+              - transcoder-master # list of branches to build
           requires:
             - build-builder
 
 jobs:
   build-builder:
-      branches:
-        only:
-         - transcoder-master # list of branches to build
     docker:
       - image: circleci/golang:1-stretch
     working_directory: /go/src/github.com/kyriediculous/go-livepool
@@ -83,9 +83,9 @@ jobs:
           command: |
             golangci-lint --disable-all --enable=gofmt --enable=vet --enable=golint --deadline=4m run pm verification
 
-      - run:
-          name: Upload build
-          command: ./upload_build.sh
+      #- run:
+      #    name: Upload build
+      #    command: ./upload_build.sh
 
       - save_cache:
           key: v3-pkg-cache
