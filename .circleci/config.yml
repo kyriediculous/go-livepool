@@ -6,9 +6,6 @@ workflows:
     jobs:
       - build-builder
       - build:
-          branches:
-            only:
-              - transcoder-master # list of branches to build
           requires:
             - build-builder
 
