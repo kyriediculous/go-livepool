@@ -83,11 +83,7 @@ jobs:
       - run: mkdir -p $TEST_RESULTS
       - setup_remote_docker:
           # This actually only exists for paid plans. But it's good luck!
-<<<<<<< HEAD
           docker_layer_caching: false
-=======
-          docker_layer_caching: true
->>>>>>> 985511e6... circleCI
 
       - run:
           name: Lint
@@ -106,7 +102,3 @@ jobs:
             - "/home/circleci/nasm/nasm"
             - "/home/circleci/x264/x264"
             - "/home/circleci/ffmpeg/libavcodec/libavcodec.a"
-<<<<<<< HEAD
-
-=======
->>>>>>> 985511e6... circleCI
