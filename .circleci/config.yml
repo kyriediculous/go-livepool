@@ -4,16 +4,10 @@ workflows:
   version: 2
   build_and_test:
     jobs:
-      - build-builder:
-          filters:
-            branches:
-              only: transcoder
+      - build-builder
       - build:
           requires:
             - build-builder
-          filters:
-            branches:
-              only: transcoder
 
 jobs:
   build-builder:

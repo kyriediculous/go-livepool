@@ -13,7 +13,7 @@ else
   EXT=""
 fi
 
-BASE="livepeer-$ARCH-amd64"
+BASE="livepool-$ARCH-amd64"
 BRANCH="${TRAVIS_BRANCH:-${CIRCLE_BRANCH:-unknown}}"
 VERSION="$(./print_version.sh)"
 if echo $VERSION | grep dirty; then
@@ -34,17 +34,13 @@ for networkBranch in $NETWORK_BRANCHES; do
   fi
 done
 
-NODE="./livepeer${EXT}"
-CLI="./livepeer_cli${EXT}"
+NODE="./livepool${EXT}"
 
 mkdir $BASE
 cp $NODE $BASE
-cp $CLI $BASE
 
 NODE_MD5=`md5sum ${NODE}`
-CLI_MD5=`md5sum ${CLI}`
 NODE_SHA256=`shasum -a 256 ${NODE}`
-CLI_SHA256=`shasum -a 256 ${CLI}`
 
 # do a basic upload so we know if stuff's working prior to doing everything else
 if [[ $ARCH == "windows" ]]; then
