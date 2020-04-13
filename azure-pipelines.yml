@@ -1,5 +1,12 @@
 trigger:
-  - transcoder
+  branches:
+    include:
+    - transcoder
+
+pr:
+  branches:
+    include:
+    - transcoder
   
 jobs:
   - job: build_livepeer
