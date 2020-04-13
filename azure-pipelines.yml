@@ -13,6 +13,5 @@ jobs:
           $Env:CIRCLE_BRANCH = "$(Build.SourceBranchName)"
           $Env:GCLOUD_KEY = "$(GCLOUD_KEY)"
           $Env:GCLOUD_SECRET = "$(GCLOUD_SECRET)"
-          $Env:DISCORD_URL = "$(DISCORD_URL)"
           ./windows-build.ps1
         failOnStderr: false
