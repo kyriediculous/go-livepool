@@ -1,3 +1,6 @@
+trigger:
+  - transcoder
+  
 jobs:
   - job: build_livepeer
 
