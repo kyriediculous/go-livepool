@@ -3,7 +3,7 @@
 # Don't mess with WORKDIR if you can avoid it, as it's different on Windows/Linux. Use relative
 # paths instead.
 
-FROM livepeerci/build-platform:latest
+FROM livepool/build-platform:latest
 
 ARG HIGHEST_CHAIN_TAG
 ENV HIGHEST_CHAIN_TAG ${HIGHEST_CHAIN_TAG}
@@ -20,6 +20,6 @@ COPY go.sum go.sum
 RUN go mod download
 
 COPY . .
-RUN make livepeer livepeer_cli
+RUN make livepeer
 
 CMD ./upload_build.sh

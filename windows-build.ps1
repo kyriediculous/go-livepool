@@ -46,6 +46,6 @@ Run-Bash '
   export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig:/build/compiled/lib/pkgconfig 
   export GOROOT=/mingw64/lib/go
   ./install_ffmpeg.sh 
-  source ./ci_env.sh && make livepeer livepeer_cli
+  source ./ci_env.sh && make livepeer
   ./upload_build.sh 
 '
