@@ -214,6 +214,7 @@ func (h *lphttp) RegisterTranscoder(req *net.RegisterRequest, stream net.Transco
 	}
 	if req.EthereumAddress == nil {
 		glog.Info(errNoEthAddress.Error())
+		return errNoEthAddress
 	}
 
 	// blocks until stream is finished
