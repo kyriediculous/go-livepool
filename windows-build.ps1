@@ -51,5 +51,5 @@ Run-Bash '
 '
 
 Write-Output "Performing self-check; if we fail after this line there are missing DLLs"
-cd livepeer-windows-amd64
-.\livepeer.exe -version
+cd livepool-windows-amd64
+.\livepool.exe -version
