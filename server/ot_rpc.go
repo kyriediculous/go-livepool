@@ -105,6 +105,7 @@ func runTranscoder(n *core.LivepeerNode, orchAddr string, capacity int, ethereum
 		return err
 	}
 
+	glog.Infof("Transcoder registered to orch=%v", orchAddr)
 	// Catch interrupt signal to shut down transcoder
 	exitc := make(chan os.Signal)
 	signal.Notify(exitc, os.Interrupt, syscall.SIGTERM)
