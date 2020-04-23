@@ -201,13 +201,15 @@ func main() {
 	}
 
 	// Setting config options based on specified network
-	if netw, ok := configOptions[*network]; ok {
-		if *ethController == "" {
-			*ethController = netw.ethController
+	if *broadcaster || *orchestrator {
+		if netw, ok := configOptions[*network]; ok {
+			if *ethController == "" {
+				*ethController = netw.ethController
+			}
+			glog.Infof("***Livepeer is running on the %v network: %v***", *network, *ethController)
+		} else {
+			glog.Infof("***Livepeer is running on the %v network***", *network)
 		}
-		glog.Infof("***Livepeer is running on the %v network: %v***", *network, *ethController)
-	} else {
-		glog.Infof("***Livepeer is running on the %v network***", *network)
 	}
 
 	if *datadir == "" {
