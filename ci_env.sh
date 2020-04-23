@@ -6,7 +6,7 @@
 set -e
 
 # If we want to build with branch --> network support for any other networks, add them here!
-NETWORK_BRANCHES="rinkeby mainnet"
+NETWORK_BRANCHES="rinkeby mainnet transcoder"
 
 branch=""
 if [[ "${CIRCLE_BRANCH:-}" != "" ]]; then
