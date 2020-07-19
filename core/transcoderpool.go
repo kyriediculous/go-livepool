@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/golang/glog"
 	"github.com/livepeer/go-livepeer/common"
+	"github.com/livepeer/go-livepeer/net"
 	"github.com/livepeer/lpms/ffmpeg"
 )
 
@@ -68,11 +69,11 @@ func (pool *PublicTranscoderPool) StopPayoutLoop() {
 func (pool *PublicTranscoderPool) payout() {
 	transcoders := pool.node.TranscoderManager.RegisteredTranscodersInfo()
 	for _, t := range transcoders {
-		go func() {
+		go func(t *net.RemoteTranscoderInfo) {
 			if err := pool.payoutTranscoder(t.EthereumAddress); err != nil {
 				glog.Errorf("error paying out transcoder transcoder=%v err=%v", t.EthereumAddress.Hex(), err)
 			}
-		}()
+		}(t)
 	}
 }
 
@@ -133,7 +134,7 @@ func verifyPixels(td *TranscodeData) error {
 			return err
 		}
 		if pxls != td.Segments[i].Pixels {
-			glog.Error("Pixel mismatch count=%v actual=%v", count, td.Pixels)
+			glog.Errorf("Pixel mismatch count=%v actual=%v", count, td.Pixels)
 			return errPixelMismatch
 		}
 	}
