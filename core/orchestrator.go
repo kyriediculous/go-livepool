@@ -929,7 +929,6 @@ func (rtm *RemoteTranscoderManager) Transcode(md *SegTranscodingMetadata) (*Tran
 			}
 		}()
 	}
-
 	rtm.completeTranscoders(currentTranscoder)
 	return res, err
 }
