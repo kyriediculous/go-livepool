@@ -36,7 +36,6 @@ import (
 	"github.com/livepeer/go-livepeer/drivers"
 	"github.com/livepeer/go-livepeer/eth"
 	"github.com/livepeer/go-livepeer/eth/blockwatch"
-	"github.com/livepeer/go-livepeer/eth/eventservices"
 	"github.com/livepeer/go-livepeer/eth/watchers"
 	"github.com/livepeer/go-livepeer/verification"
 
@@ -189,12 +188,8 @@ func main() {
 	}
 
 	if *maxSessions <= 0 {
-		if *nvidia == "" {
-			glog.Fatal("-maxSessions must be greater than zero")
-			return
-		}
-		devices := strings.Split(*nvidia, ",")
-		*maxSessions = len(devices) * 3
+		glog.Fatal("-maxSessions must be greater than zero")
+		return
 	}
 
 	type NetworkConfig struct {
@@ -283,8 +278,6 @@ func main() {
 				}
 			}
 			n.Transcoder = core.NewLoadBalancingTranscoder(*nvidia, core.NewNvidiaTranscoder)
-			glog.Infof("Using GPUs with following PCIe IDs: %v", *nvidia)
-			glog.Infof("Transcoder max sessions: %v", *maxSessions)
 		} else {
 			n.Transcoder = core.NewLocalTranscoder(*datadir)
 		}
@@ -306,44 +299,35 @@ func main() {
 		glog.Fatalf("No services enabled; must be at least one of -broadcaster, -transcoder, -orchestrator, -redeemer, -reward or -initializeRound")
 	}
 
+	lpmon.NodeID = *ethAcctAddr
+	if lpmon.NodeID != "" {
+		lpmon.NodeID += "-"
+	}
+	hn, _ := os.Hostname()
+	lpmon.NodeID += hn
+
 	if *monitor {
 		lpmon.Enabled = true
-		nodeID := *ethAcctAddr
-		if nodeID == "" {
-			hn, _ := os.Hostname()
-			nodeID = hn
-		}
-		nodeType := "dflt"
+		nodeType := lpmon.Default
 		switch n.NodeType {
 		case core.BroadcasterNode:
-			nodeType = "bctr"
+			nodeType = lpmon.Broadcaster
 		case core.OrchestratorNode:
-			nodeType = "orch"
+			nodeType = lpmon.Orchestrator
 		case core.TranscoderNode:
-			nodeType = "trcr"
+			nodeType = lpmon.Transcoder
 		case core.RedeemerNode:
-			nodeType = "rdmr"
+			nodeType = lpmon.Redeemer
 		}
-		lpmon.InitCensus(nodeType, nodeID, core.LivepeerVersion)
-	}
-
-	if n.NodeType == core.TranscoderNode {
-		glog.Info("***Livepeer is in transcoder mode ***")
-		if n.OrchSecret == "" {
-			glog.Fatal("Missing -orchSecret")
-		}
-		if len(orchURLs) > 0 {
-			server.RunTranscoder(n, orchURLs[0].Host, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
-		} else {
-			glog.Fatal("Missing -orchAddr")
-		}
-		return
+		lpmon.InitCensus(nodeType, core.LivepeerVersion)
 	}
 
 	watcherErr := make(chan error)
-	redeemerErr := make(chan error)
+	serviceErr := make(chan error)
 	var timeWatcher *watchers.TimeWatcher
 	if *network == "offchain" {
+		glog.Infof("***Livepeer is in off-chain mode***")
+
 		if err := checkOrStoreChainID(dbh, big.NewInt(0)); err != nil {
 			glog.Error(err)
 			return
@@ -520,11 +504,14 @@ func main() {
 			// Set price per pixel base info
 			if *pixelsPerUnit <= 0 {
 				// Can't divide by 0
-				panic(fmt.Errorf("The amount of pixels per unit must be greater than 0, provided %d instead\n", *pixelsPerUnit))
+				panic(fmt.Errorf("-pixelsPerUnit must be > 0, provided %d", *pixelsPerUnit))
 			}
-			if *pricePerUnit <= 0 {
-				// Prevent orchestrator from unknowingly provide free transcoding
-				panic(fmt.Errorf("Price per unit of pixels must be greater than 0, provided %d instead\n", *pricePerUnit))
+			if !isFlagSet["pricePerUnit"] && *pricePerUnit == 0 {
+				// Prevent orchestrators from unknowingly providing free transcoding
+				panic(fmt.Errorf("-pricePerUnit must be set"))
+			}
+			if *pricePerUnit < 0 {
+				panic(fmt.Errorf("-pricePerUnit must be >= 0, provided %d", *pricePerUnit))
 			}
 			n.SetBasePrice(big.NewRat(int64(*pricePerUnit), int64(*pixelsPerUnit)))
 			glog.Infof("Price: %d wei for %d pixels\n ", *pricePerUnit, *pixelsPerUnit)
@@ -661,7 +648,7 @@ func main() {
 
 			go func() {
 				if err := r.Start(url, n.WorkDir); err != nil {
-					redeemerErr <- err
+					serviceErr <- err
 					return
 				}
 			}()
@@ -684,16 +671,26 @@ func main() {
 		if *reward {
 			// Start reward service
 			// The node will only call reward if it is active in the current round
-			rs := eventservices.NewRewardService(n.Eth, blockPollingTime)
-			rs.Start(ctx)
+			rs := eth.NewRewardService(n.Eth, timeWatcher)
+			go func() {
+				if err := rs.Start(ctx); err != nil {
+					serviceErr <- err
+				}
+				return
+			}()
 			defer rs.Stop()
 		}
 
 		if *initializeRound {
 			// Start round initializer
 			// The node will only initialize rounds if it in the upcoming active set for the round
-			initializer := eth.NewRoundInitializer(n.Eth, n.Database, timeWatcher, blockPollingTime)
-			go initializer.Start()
+			initializer := eth.NewRoundInitializer(n.Eth, timeWatcher)
+			go func() {
+				if err := initializer.Start(); err != nil {
+					serviceErr <- err
+				}
+				return
+			}()
 			defer initializer.Stop()
 		}
 
@@ -729,10 +726,6 @@ func main() {
 		glog.Error("Should specify both s3bucket and s3creds")
 		return
 	}
-	if *s3bucket != "" {
-		s3bp := strings.Split(*s3bucket, "/")
-		drivers.S3BUCKET = s3bp[1]
-	}
 	if *gsBucket != "" && *gsKey == "" || *gsBucket == "" && *gsKey != "" {
 		glog.Error("Should specify both gsbucket and gskey")
 		return
@@ -742,14 +735,50 @@ func main() {
 	if *s3bucket != "" && *s3creds != "" {
 		br := strings.Split(*s3bucket, "/")
 		cr := strings.Split(*s3creds, "/")
-		drivers.NodeStorage = drivers.NewS3Driver(br[0], br[1], cr[0], cr[1])
+		u := url.URL{
+			Scheme: "s3",
+			Host:   br[0],
+			Path:   fmt.Sprintf("/%s", br[1]),
+			User:   url.UserPassword(cr[0], cr[1]),
+		}
+		glog.Warningf("-s3bucket and -s3creds are deprecated. Instead, you can use -objectStore %s", u.String())
+		ustr := u.String()
+		objectstore = &ustr
 	}
 
 	if *gsBucket != "" && *gsKey != "" {
-		drivers.GSBUCKET = *gsBucket
-		drivers.NodeStorage, err = drivers.NewGoogleDriver(*gsBucket, *gsKey)
+		u := url.URL{
+			Scheme:   "gs",
+			Host:     *gsBucket,
+			RawQuery: fmt.Sprintf("keyfile=%s", *gsKey),
+		}
+		glog.Warningf("-gsbucket and -gskey are deprecated. Instead, you can use -objectStore %s", u.String())
+		ustr := u.String()
+		objectstore = &ustr
+	}
+
+	if *objectstore != "" {
+		prepared, err := drivers.PrepareOSURL(*objectstore)
 		if err != nil {
-			glog.Error("Error creating Google Storage driver:", err)
+			glog.Error("Error creating object store driver: ", err)
+			return
+		}
+		drivers.NodeStorage, err = drivers.ParseOSURL(prepared, false)
+		if err != nil {
+			glog.Error("Error creating object store driver: ", err)
+			return
+		}
+	}
+
+	if *recordstore != "" {
+		prepared, err := drivers.PrepareOSURL(*recordstore)
+		if err != nil {
+			glog.Error("Error creating recordings object store driver: ", err)
+			return
+		}
+		drivers.RecordStorage, err = drivers.ParseOSURL(prepared, true)
+		if err != nil {
+			glog.Error("Error creating recordings object store driver: ", err)
 			return
 		}
 	}
@@ -757,6 +786,15 @@ func main() {
 	core.MaxSessions = *maxSessions
 	if lpmon.Enabled {
 		lpmon.MaxSessions(core.MaxSessions)
+	}
+
+	if *authWebhookURL != "" {
+		_, err := validateURL(*authWebhookURL)
+		if err != nil {
+			glog.Fatal("Error setting auth webhook URL ", err)
+		}
+		glog.Info("Using auth webhook URL ", *authWebhookURL)
+		server.AuthWebhookURL = *authWebhookURL
 	}
 
 	if n.NodeType == core.BroadcasterNode {
@@ -797,14 +835,6 @@ func main() {
 			// Not a fatal error; may continue operating in segment-only mode
 			glog.Error("No orchestrator specified; transcoding will not happen")
 		}
-		if *authWebhookURL != "" {
-			_, err := validateURL(*authWebhookURL)
-			if err != nil {
-				glog.Fatal("Error setting auth webhook URL ", err)
-			}
-			glog.Info("Using auth webhook URL ", *authWebhookURL)
-			server.AuthWebhookURL = *authWebhookURL
-		}
 
 		isLocalHTTP, err := isLocalURL("https://" + *httpAddr)
 		if err != nil {
@@ -816,7 +846,12 @@ func main() {
 			*httpIngest = false
 		}
 
-		// Set up verifier
+		// Disable local verification when running in off-chain mode
+		// To enable, set -localVerify or -verifierURL
+		if !isFlagSet["localVerify"] && *network == "offchain" {
+			*localVerify = false
+		}
+
 		if *verifierURL != "" {
 			_, err := validateURL(*verifierURL)
 			if err != nil {
@@ -824,8 +859,6 @@ func main() {
 			}
 			glog.Info("Using the Epic Labs classifier for verification at ", *verifierURL)
 			server.Policy = &verification.Policy{Retries: 2, Verifier: &verification.EpicClassifier{Addr: *verifierURL}}
-			// TODO Set up a default "empty" verifier-less policy for onchain
-			//      that only checks sigs and pixels?
 
 			// Set the verifier path. Remove once [1] is implemented!
 			// [1] https://github.com/livepeer/verification-classifier/issues/64
@@ -833,7 +866,8 @@ func main() {
 				glog.Fatal("Requires a path to the verifier shared volume when local storage is in use; use -verifierPath, S3 or GCS")
 			}
 			verification.VerifierPath = *verifierPath
-		} else if *network != "offchain" {
+		} else if *localVerify {
+			glog.Info("Local verification enabled")
 			server.Policy = &verification.Policy{Retries: 2}
 		}
 
@@ -915,6 +949,18 @@ func main() {
 
 	}()
 
+	if n.NodeType == core.TranscoderNode {
+		glog.Info("***Livepeer is in transcoder mode ***")
+		if n.OrchSecret == "" {
+			glog.Fatal("Missing -orchSecret")
+		}
+		if len(orchURLs) > 0 {
+			server.RunTranscoder(n, orchURLs[0].Host, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
+		} else {
+			glog.Fatal("Missing -orchAddr")
+		}
+	}
+
 	switch n.NodeType {
 	case core.OrchestratorNode:
 		glog.Infof("***Livepeer Running in Orchestrator Mode***")
@@ -936,9 +982,9 @@ func main() {
 	case err := <-ec:
 		glog.Infof("Error from media server: %v", err)
 		return
-	case err := <-redeemerErr:
+	case err := <-serviceErr:
 		if err != nil {
-			glog.Fatalf("Error starting redemption service: %v", err)
+			glog.Fatalf("Error starting service: %v", err)
 		}
 	case <-msCtx.Done():
 		glog.Infof("MediaServer Done()")
