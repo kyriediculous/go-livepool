@@ -1,25 +1,17 @@
+
 version: 2
 
 workflows:
   version: 2
   build_and_test:
     jobs:
-      - build-builder:
-          filters:
-            branches:
-              only: master
+      - build-builder
       - build:
           requires:
             - build-builder
-          filters:
-            branches:
-              only: master
 
 jobs:
   build-builder:
-      branches:
-        only:
-         - transcoder-master # list of branches to build
     docker:
       - image: circleci/golang:1.15.5
     working_directory: /go/src/github.com/kyriediculous/go-livepool
@@ -90,9 +82,9 @@ jobs:
           command: |
             golangci-lint --disable-all --enable=gofmt --enable=vet --enable=golint --deadline=4m run pm verification
 
-      - run:
-          name: Upload build
-          command: ./upload_build.sh
+    #  - run:
+    #      name: Upload build
+    #      command: ./upload_build.sh
 
       - save_cache:
           key: v3-pkg-cache
@@ -102,7 +94,4 @@ jobs:
             - "/home/circleci/nasm/nasm"
             - "/home/circleci/x264/x264"
             - "/home/circleci/ffmpeg/libavcodec/libavcodec.a"
-<<<<<<< HEAD
-=======
 
->>>>>>> bff037f0... fix build pipelines
