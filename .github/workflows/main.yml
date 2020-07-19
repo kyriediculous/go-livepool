@@ -17,11 +17,10 @@ jobs:
     - name: Build ffmpeg
       run: msys2do ./install_ffmpeg.sh
     - name: Build Livepeer
-      run: msys2do ./ci_env.sh make livepeer livepeer_cli
+      run: msys2do ./ci_env.sh make all
     - name: Upload build
       env: 
         CIRCLE_BRANCH: ${{ github.head_ref }}
         GCLOUD_KEY: ${{ secrets.GCLOUD_KEY }}
         GCLOUD_SECRET: ${{ secrets.GCLOUD_SECRET }}
-        DISCORD_URL: ${{ secrets.DISCORD_URL }}
       run: msys2do ./upload_build.sh
