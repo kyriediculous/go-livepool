@@ -7,13 +7,13 @@ workflows:
       - build-builder:
           filters:
             branches:
-              only: transcoder
+              only: master
       - build:
           requires:
             - build-builder
           filters:
             branches:
-              only: transcoder
+              only: master
 
 jobs:
   build-builder:
