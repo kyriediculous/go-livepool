@@ -226,6 +226,9 @@ message RegisterRequest {
 
     // Transcoder capacity
     int64 capacity = 2;
+
+    // Transcoder ethereum address
+    bytes ethereum_address = 3;
 }
 
 // Sent by the orchestrator to the transcoder
