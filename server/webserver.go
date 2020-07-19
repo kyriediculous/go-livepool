@@ -17,6 +17,7 @@ import (
 
 	"github.com/cenkalti/backoff"
 	"github.com/ethereum/go-ethereum/common"
+	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/golang/glog"
 	lpcommon "github.com/livepeer/go-livepeer/common"
@@ -24,6 +25,7 @@ import (
 	"github.com/livepeer/go-livepeer/eth"
 	lpTypes "github.com/livepeer/go-livepeer/eth/types"
 	"github.com/livepeer/go-livepeer/monitor"
+	"github.com/livepeer/go-livepeer/net"
 	ffmpeg "github.com/livepeer/lpms/ffmpeg"
 )
 
@@ -775,6 +777,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 	})
 
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		status := s.GetNodeStatus()
 		if status != nil {
 			if data, err := json.Marshal(status); err == nil {
@@ -784,6 +787,86 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 			}
 		}
 		http.Error(w, "Error getting status", http.StatusInternalServerError)
+	})
+
+	mux.HandleFunc("/poolStats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		pool := s.LivepeerNode.TranscoderManager.Pool
+		if pool == nil {
+			glog.Errorf("Orchestrator is not running in public transcoder pool mode")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		totalPayouts, err := pool.TotalPayouts()
+		if err != nil {
+			glog.Error("unable to get total pool payout")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		comm := big.NewRat(pool.Commission().Int64(), 100).FloatString(2)
+
+		poolStats := struct {
+			Commission   string
+			Version      string
+			BasePrice    string
+			TotalPayouts string
+		}{
+			Commission:   comm,
+			Version:      core.LivepeerVersion,
+			BasePrice:    s.LivepeerNode.GetBasePrice().FloatString(0),
+			TotalPayouts: totalPayouts.String(),
+		}
+
+		data, err := json.Marshal(poolStats)
+		if err != nil {
+			glog.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
+	})
+
+	mux.HandleFunc("/transcoders", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+
+		type remoteT struct {
+			Nodes   []*net.RemoteTranscoderInfo
+			Pending *big.Int
+			Payout  *big.Int
+		}
+
+		transcoders := make(map[ethcommon.Address]*remoteT)
+
+		if s.LivepeerNode.TranscoderManager != nil {
+			tinfos := s.LivepeerNode.TranscoderManager.RegisteredTranscodersInfo()
+			for _, t := range tinfos {
+				rewards, err := s.LivepeerNode.Database.SelectRemoteTranscoder(t.EthereumAddress)
+				if err != nil {
+					glog.Error(err)
+					continue
+				}
+				tr, ok := transcoders[t.EthereumAddress]
+				if !ok {
+					transcoders[t.EthereumAddress] = &remoteT{
+						Nodes:   []*net.RemoteTranscoderInfo{t},
+						Pending: rewards.Pending,
+						Payout:  rewards.Payout,
+					}
+				}
+				tr.Nodes = append(tr.Nodes, t)
+			}
+		}
+		if data, err := json.Marshal(transcoders); err == nil {
+			w.Write(data)
+			return
+		}
+		http.Error(w, "Error getting transcoders", http.StatusInternalServerError)
 	})
 
 	mux.HandleFunc("/contractAddresses", func(w http.ResponseWriter, r *http.Request) {
