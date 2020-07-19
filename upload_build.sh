@@ -99,9 +99,12 @@ curl -X PUT -T "${FILE}" \
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 curl --fail -s -H "Content-Type: application/json" -X POST -d "{\"content\": \"Build succeeded ✅\nBranch: $BRANCH\nPlatform: $ARCH-amd64\nLast commit: $(git log -1 --pretty=format:'%s by %an')\nhttps://build.livepeer.live/$VERSION_AND_NETWORK/${FILE}\nSHA256:\n${FILE_SHA256}\"}" $DISCORD_URL 2>/dev/null
 =======
 >>>>>>> 654d1f38... fix build pipelines
 =======
 >>>>>>> 15f3801a... make: build pipelines
+=======
+>>>>>>> bff037f0... fix build pipelines
 echo "done"
