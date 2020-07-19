@@ -1028,7 +1028,7 @@ func (db *DB) SelectRemoteTranscoder(address ethcommon.Address) (*DBRemoteT, err
 		pendingS string
 		payoutS  string
 	)
-	if err := row.Scan(&pendingS, &payoutS); err != nil {
+	if err := row.Scan(&pendingS, &payoutS); err != nil && err.Error() != "sql: no rows in result set" {
 		return nil, err
 	}
 

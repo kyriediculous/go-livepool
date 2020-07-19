@@ -899,8 +899,9 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 						Pending: rewards.Pending,
 						Payout:  rewards.Payout,
 					}
+				} else {
+					tr.Nodes = append(tr.Nodes, t)
 				}
-				tr.Nodes = append(tr.Nodes, t)
 			}
 		}
 		if data, err := json.Marshal(transcoders); err == nil {
