@@ -118,6 +118,8 @@ type LivepeerEthClient interface {
 	Sign([]byte) ([]byte, error)
 	GetGasInfo() (uint64, *big.Int)
 	SetGasInfo(uint64, *big.Int) error
+
+	SendEth(amount *big.Int, to ethcommon.Address) error
 }
 
 type client struct {
@@ -872,6 +874,53 @@ func (c *client) CheckTx(tx *types.Transaction) error {
 
 func (c *client) Sign(msg []byte) ([]byte, error) {
 	return c.accountManager.Sign(msg)
+}
+
+func (c *client) SendEth(amount *big.Int, to ethcommon.Address) error {
+	addr := c.Account().Address
+	nonce, err := c.backend.PendingNonceAt(context.Background(), addr)
+	if err != nil {
+		return err
+	}
+
+	gasLimit := uint64(21000) // in units
+
+	gasPrice, err := c.backend.SuggestGasPrice(context.Background())
+	if err != nil {
+		return err
+	}
+	if err != nil {
+		return err
+	}
+
+	txCost := new(big.Int).Mul(gasPrice, big.NewInt(int64(gasLimit)))
+
+	actualAmount := new(big.Int).Sub(amount, txCost)
+
+	// If amount too small , don't pay out and wait for next round
+	if actualAmount.Cmp(new(big.Int).Mul(txCost, big.NewInt(10))) < 0 {
+		return fmt.Errorf("not enough balance to pay out to justify transaction cost txCost=%v payout=%v", txCost, amount)
+	}
+
+	tx := types.NewTransaction(nonce, to, actualAmount, gasLimit, gasPrice, nil)
+
+	newSignedTx, err := c.accountManager.SignTx(tx)
+	if err != nil {
+		return err
+	}
+
+	// use timeout
+
+	if err := c.backend.SendTransaction(context.Background(), newSignedTx); err != nil {
+		return err
+	}
+
+	if err != nil && err.Error() == "replacement transaction underpriced" {
+		newGasPrice := new(big.Int).Add(gasPrice, new(big.Int).Div(gasPrice, big.NewInt(5)))
+		c.ReplaceTransaction(newSignedTx, "", newGasPrice)
+	}
+
+	return c.CheckTx(newSignedTx)
 }
 
 func (c *client) ReplaceTransaction(tx *types.Transaction, method string, gasPrice *big.Int) (*types.Transaction, error) {
