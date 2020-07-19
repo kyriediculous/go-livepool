@@ -4,10 +4,16 @@ workflows:
   version: 2
   build_and_test:
     jobs:
-      - build-builder
+      - build-builder:
+          filters:
+            branches:
+              only: transcoder
       - build:
           requires:
             - build-builder
+          filters:
+            branches:
+              only: transcoder
 
 jobs:
   build-builder:
@@ -24,20 +30,21 @@ jobs:
       - checkout
       - setup_remote_docker:
           # This actually only exists for paid plans. But it's good luck!
-          docker_layer_caching: true
+          docker_layer_caching: false
 
       - run: docker login -u $DOCKER_USER -p $DOCKER_PASS
 
       # First, build the Linux-specific builder container
-      - run: docker pull livepeerci/build-platform:latest || echo 'no pre-existing cache found'
-      - run: docker build -t livepeerci/build-platform:latest --cache-from=livepeerci/build-platform:latest -f docker/Dockerfile.build-linux .
-      - run: docker push livepeerci/build-platform:latest
+      - run: docker pull livepool/build-platform:latest || echo 'no pre-existing cache found'
+      - run: docker build -t livepool/build-platform:latest --cache-from=livepool/build-platform:latest -f docker/Dockerfile.build-linux .
+      - run: docker push livepool/build-platform:latest
 
       # Then, build the actual app in a container shared between Linux and Windows
-      - run: docker pull livepeerci/build:latest || echo 'no pre-existing cache found'
+      - run: docker pull livepool/build:latest || echo 'no pre-existing cache found'
       - run: |-
-          ./ci_env.sh docker build --build-arg HIGHEST_CHAIN_TAG -t livepeerci/build:latest --cache-from=livepeerci/build:latest -f docker/Dockerfile.build .
-      - run: docker push livepeerci/build:latest
+          source ./ci_env.sh
+          docker build --build-arg HIGHEST_CHAIN_TAG -t livepool/build:latest --cache-from=livepool/build:latest -f docker/Dockerfile.build .
+      - run: docker push livepool/build:latest
 
       # Finally, build the minimal go-livepeer distributable. We publish two tags for each build:
       # livepeer/go-livepeer:BRANCH_NAME and livepeer/go-livepeer:VERSION_STRING. Both are useful
@@ -48,18 +55,18 @@ jobs:
           VERSION_TAG=$(./print_version.sh)
           docker build -t current-build -f docker/Dockerfile.release-linux .
           for TAG in $BRANCH_TAG $VERSION_TAG; do
-            docker tag current-build livepeer/go-livepeer:${TAG}-linux
-            docker push livepeer/go-livepeer:${TAG}-linux
+            docker tag current-build livepool/go-livepool:${TAG}-linux
+            docker push livepool/go-livepool:${TAG}-linux
             # Manifest step is optional in case the Windows build hasn't finished yet
-            docker manifest create livepeer/go-livepeer:${TAG} livepeer/go-livepeer:${TAG}-linux livepeer/go-livepeer:${TAG}-windows || true
-            docker manifest push livepeer/go-livepeer:${TAG} || true
+            docker manifest create livepool/go-livepool:${TAG} livepool/go-livepool:${TAG}-linux livepool/go-livepool:${TAG}-windows || true
+            docker manifest push livepool/go-livepool:${TAG} || true
           done
 
   build:
     docker:
       # Note race condition - we might get the wrong builder if lots of builds are happening in
       # parallel because this pulls it down from Docker Hub.
-      - image: livepeerci/build:latest
+      - image: livepool/build:latest
     working_directory: /build
 
     environment:
@@ -72,9 +79,7 @@ jobs:
 
       - setup_remote_docker:
           # This actually only exists for paid plans. But it's good luck!
-          docker_layer_caching: true
-
-      - run: mkdir -p $TEST_RESULTS
+          docker_layer_caching: false
 
       - run:
           name: Lint
@@ -82,22 +87,8 @@ jobs:
             golangci-lint --disable-all --enable=gofmt --enable=vet --enable=golint --deadline=4m run pm verification
 
       - run:
-          name: Run unit tests
-          command: |
-            trap "go-junit-report <${TEST_RESULTS}/go-test.out > ${TEST_RESULTS}/go-test-report.xml" EXIT
-            /bin/bash test.sh 2>&1 | tee $TEST_RESULTS/go-test.out
-
-      - run:
-          name: Localdocker build check
-          command: make localdocker
-
-      - run:
           name: Upload build
           command: ./upload_build.sh
-
-      - run:
-          name: Notify that new build has been uploaded
-          command: curl -X POST https://holy-bread-207a.livepeer.workers.dev
 
       - save_cache:
           key: v3-pkg-cache
@@ -108,5 +99,3 @@ jobs:
             - "/home/circleci/x264/x264"
             - "/home/circleci/ffmpeg/libavcodec/libavcodec.a"
 
-      - store_test_results:
-          path: /tmp/test-results
