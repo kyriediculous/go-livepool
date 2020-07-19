@@ -13,10 +13,10 @@ else
   EXT=""
 fi
 
-BASE="livepeer-$ARCH-amd64"
-BRANCH="${TRAVIS_BRANCH:-unknown}"
-if [[ "${GHA_REF:-}" != "" ]]; then
-  BRANCH="$(echo $GHA_REF | sed 's/refs\/heads\///')"
+BASE="livepool-$ARCH-amd64"
+BRANCH="${TRAVIS_BRANCH:-${CIRCLE_BRANCH:-unknown}}"
+if [[ "${GITHUB_REF:-}" != "" ]]; then
+  BRANCH="$(echo $GITHUB_REF | sed 's/refs\/heads\///')"
 fi
 VERSION="$(./print_version.sh)"
 if echo $VERSION | grep dirty; then
@@ -27,7 +27,7 @@ if echo $VERSION | grep dirty; then
 fi
 
 # If we want to build with branch --> network support for any other networks, add them here!
-NETWORK_BRANCHES="rinkeby mainnet"
+NETWORK_BRANCHES="mainnet"
 # If the binaries are built off a network branch then the resource path should include the network branch name i.e. X.Y.Z/rinkeby or X.Y.Z/mainnet
 # If the binaries are not built off a network then the resource path should only include the version i.e. X.Y.Z
 VERSION_AND_NETWORK=$VERSION
@@ -41,12 +41,14 @@ NODE="./livepeer${EXT}"
 CLI="./livepeer_cli${EXT}"
 BENCH="./livepeer_bench${EXT}"
 ROUTER="./livepeer_router${EXT}"
+POOL="./livepool${EXT}"
 
 mkdir $BASE
 cp $NODE $BASE
 cp $CLI $BASE
 cp $BENCH $BASE
 cp $ROUTER $BASE
+cp $POOL $BASE
 
 # do a basic upload so we know if stuff's working prior to doing everything else
 if [[ $ARCH == "windows" ]]; then
@@ -68,7 +70,7 @@ if [[ "${GCLOUD_KEY:-}" == "" ]]; then
 fi
 
 # https://stackoverflow.com/a/44751929/990590
-bucket=build.livepeer.live
+bucket=build.livepool.io
 resource="/${bucket}/${VERSION_AND_NETWORK}/${FILE}"
 contentType="application/x-compressed-tar"
 dateValue=`date -R`
@@ -89,5 +91,23 @@ curl -X PUT -T "${FILE}" \
   -H "Authorization: AWS ${GCLOUD_KEY}:${signature}" \
   $fullUrl
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
 curl --fail -s -H "Content-Type: application/json" -X POST -d "{\"content\": \"Build succeeded ✅\nBranch: $BRANCH\nPlatform: $ARCH-amd64\nLast commit: $(git log -1 --pretty=format:'%s by %an')\nhttps://build.livepeer.live/$VERSION_AND_NETWORK/${FILE}\nSHA256:\n${FILE_SHA256}\"}" $DISCORD_URL 2>/dev/null
+=======
+>>>>>>> 654d1f38... fix build pipelines
+=======
+>>>>>>> 15f3801a... make: build pipelines
+=======
+>>>>>>> bff037f0... fix build pipelines
+=======
+>>>>>>> 15f3801a... make: build pipelines
+=======
+>>>>>>> 654d1f38... fix build pipelines
+=======
+>>>>>>> bff037f0... fix build pipelines
 echo "done"

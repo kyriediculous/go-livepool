@@ -1,6 +1,6 @@
 module github.com/livepeer/go-livepeer
 
-go 1.13
+go 1.15
 
 require (
 	cloud.google.com/go/storage v1.6.0
@@ -18,7 +18,6 @@ require (
 	github.com/elastic/gosigar v0.10.5 // indirect
 	github.com/ethereum/go-ethereum v1.9.3
 	github.com/fatih/color v1.7.0 // indirect
-	// replace example.com/some/dependency => example.com/some/dependency-fork v1.2.3
 	github.com/fjl/memsize v0.0.0-20190710130421-bcb5799ab5e5 // indirect
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff // indirect
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b

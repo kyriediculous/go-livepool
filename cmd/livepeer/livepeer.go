@@ -600,8 +600,8 @@ func main() {
 				comissionRate := big.NewInt(int64(*poolCommission))
 				pool := core.NewPublicTranscoderPool(n, timeWatcher.SubscribeRounds, comissionRate)
 				n.TranscoderManager.Pool = pool
-				go pool.StartPayoutLoop()
-				defer pool.StopPayoutLoop()
+				// go pool.StartPayoutLoop()
+				// defer pool.StopPayoutLoop()
 			}
 		}
 
@@ -934,7 +934,7 @@ func main() {
 			glog.Fatal("Missing -orchSecret")
 		}
 		if len(orchURLs) > 0 {
-			server.RunTranscoder(n, orchURLs[0].Host, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
+			server.RunTranscoder(n, orchURLs, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
 		} else {
 			glog.Fatal("Missing -orchAddr")
 		}

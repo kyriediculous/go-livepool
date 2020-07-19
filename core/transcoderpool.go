@@ -1,20 +1,25 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/big"
 	"os"
+	"time"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/golang/glog"
 	"github.com/livepeer/go-livepeer/common"
-	"github.com/livepeer/go-livepeer/net"
 	"github.com/livepeer/lpms/ffmpeg"
 )
+
+const payoutTicker = 1 * time.Hour
+
+const feeShare = 90
 
 var errPixelMismatch = errors.New("pixel mismatch")
 
@@ -49,13 +54,13 @@ func (pool *PublicTranscoderPool) StartPayoutLoop() {
 	sub := pool.roundSub(roundEvents)
 	defer sub.Unsubscribe()
 
+	ticker := time.NewTicker(payoutTicker)
+
 	for {
 		select {
 		case <-pool.quit:
 			return
-		case err := <-sub.Err():
-			glog.Error(err)
-		case <-roundEvents:
+		case <-ticker.C:
 			pool.payout()
 		}
 	}
@@ -67,11 +72,16 @@ func (pool *PublicTranscoderPool) StopPayoutLoop() {
 }
 
 func (pool *PublicTranscoderPool) payout() {
-	transcoders := pool.node.TranscoderManager.RegisteredTranscodersInfo()
+	transcoders, err := pool.node.Database.RemoteTranscoders()
+	if err != nil {
+		glog.Error(err)
+		return
+	}
+
 	for _, t := range transcoders {
-		go func(t *net.RemoteTranscoderInfo) {
-			if err := pool.payoutTranscoder(t.EthereumAddress); err != nil {
-				glog.Errorf("error paying out transcoder transcoder=%v err=%v", t.EthereumAddress.Hex(), err)
+		go func(t *common.DBRemoteT) {
+			if err := pool.payoutTranscoder(t.Address); err != nil {
+				glog.Errorf("error paying out transcoder transcoder=%v err=%v", t.Address.Hex(), err)
 			}
 		}(t)
 	}
@@ -87,7 +97,30 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 		return nil
 	}
 
-	err = pool.node.Eth.SendEth(bal, transcoder)
+	// check transaction cost overhead
+	gasLimit := big.NewInt(21000)
+	b, err := pool.node.Eth.Backend()
+	if err != nil {
+		return err
+	}
+	timeOut := 6 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeOut)
+	defer cancel()
+
+	gasPrice, err := b.SuggestGasPrice(ctx)
+	if err != nil {
+		return err
+	}
+	txCost := new(big.Int).Mul(gasPrice, gasLimit)
+
+	multiplier := big.NewInt(50)
+	if bal.Cmp(new(big.Int).Mul(txCost, multiplier)) <= 0 {
+		glog.V(6).Infof("Transcoder does not have enough balance to pay out transcoder=%v balance=%v txCost=%v", rt.Address.Hex(), bal, txCost)
+		return nil
+	}
+
+	payout := bal.Sub(bal, txCost)
+	err = pool.node.Eth.SendEth(payout, transcoder)
 	if err != nil {
 		return err
 	}
@@ -95,13 +128,15 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 	if err := pool.node.Database.UpdateRemoteTranscoder(&common.DBRemoteT{
 		Address: transcoder,
 		Pending: big.NewInt(0),
-		Payout:  new(big.Int).Add(rt.Payout, bal),
+		Payout:  new(big.Int).Add(rt.Payout, payout),
 	}); err != nil {
 		glog.Error(err)
 		return err
 	}
 
-	return pool.node.Database.IncreasePoolPayout(bal)
+	glog.Infof("Paid out %v to transcoder %v", payout, transcoder.Hex())
+
+	return pool.node.Database.IncreasePoolPayout(payout)
 }
 
 func (pool *PublicTranscoderPool) Reward(transcoder *RemoteTranscoder, td *TranscodeData) error {
@@ -113,7 +148,8 @@ func (pool *PublicTranscoderPool) Reward(transcoder *RemoteTranscoder, td *Trans
 	if err != nil {
 		return err
 	}
-	price := pool.node.GetBasePrice()
+	basePrice := pool.node.GetBasePrice()
+	price := new(big.Rat).Mul(basePrice, big.NewRat(feeShare, 100))
 	fees := new(big.Rat).Mul(price, big.NewRat(td.Pixels, 1))
 	commission := new(big.Rat).Mul(fees, big.NewRat(pool.commission.Int64(), 10000))
 	feesInt, ok := new(big.Int).SetString(fees.Sub(fees, commission).FloatString(0), 10)

@@ -921,31 +921,15 @@ func (c *client) SendEth(amount *big.Int, to ethcommon.Address) error {
 		return err
 	}
 
-	txCost := new(big.Int).Mul(gasPrice, big.NewInt(int64(gasLimit)))
-
-	actualAmount := new(big.Int).Sub(amount, txCost)
-
-	// If amount too small , don't pay out and wait for next round
-	if actualAmount.Cmp(new(big.Int).Mul(txCost, big.NewInt(10))) < 0 {
-		return fmt.Errorf("not enough balance to pay out to justify transaction cost txCost=%v payout=%v", txCost, amount)
-	}
-
-	tx := types.NewTransaction(nonce, to, actualAmount, gasLimit, gasPrice, nil)
+	tx := types.NewTransaction(nonce, to, amount, gasLimit, gasPrice, nil)
 
 	newSignedTx, err := c.accountManager.SignTx(tx)
 	if err != nil {
 		return err
 	}
 
-	// use timeout
-
 	if err := c.backend.SendTransaction(context.Background(), newSignedTx); err != nil {
 		return err
-	}
-
-	if err != nil && err.Error() == "replacement transaction underpriced" {
-		newGasPrice := new(big.Int).Add(gasPrice, new(big.Int).Div(gasPrice, big.NewInt(5)))
-		c.ReplaceTransaction(newSignedTx, "", newGasPrice)
 	}
 
 	return c.CheckTx(newSignedTx)

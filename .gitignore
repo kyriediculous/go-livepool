@@ -19,7 +19,9 @@ eth/protocol
 # Our compiled binary
 /livepeer
 /livepeer_cli
+/livepool
 /livepeer_router
+/livepeer_bench
 
 /.git.describe
 /livepeer-windows-amd64.zip

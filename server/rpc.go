@@ -185,22 +185,26 @@ func CheckOrchestratorAvailability(orch Orchestrator) bool {
 
 	ping := crypto.Keccak256(tsSignature)
 
-	orchClient, conn, err := startOrchestratorClient(orch.ServiceURI())
-	if err != nil {
-		return false
-	}
-	defer conn.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), GRPCTimeout)
-	defer cancel()
-
-	pong, err := orchClient.Ping(ctx, &net.PingPong{Value: ping})
+	pong, err := sendPing(orch.ServiceURI(), ping)
 	if err != nil {
 		glog.Error("Was not able to submit Ping: ", err)
 		return false
 	}
 
 	return orch.VerifySig(orch.Address(), string(ping), pong.Value)
+}
+
+func sendPing(orchAddr *url.URL, value []byte) (*net.PingPong, error) {
+	orchClient, conn, err := startOrchestratorClient(orchAddr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCTimeout)
+	defer cancel()
+
+	return orchClient.Ping(ctx, &net.PingPong{Value: value})
 }
 
 func ping(context context.Context, req *net.PingPong, orch Orchestrator) (*net.PingPong, error) {

@@ -12,9 +12,11 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -45,10 +47,11 @@ var errNoEthAddress = errors.New("No ethereum address")
 
 // RunTranscoder is main routing of standalone transcoder
 // Exiting it will terminate executable
-func RunTranscoder(n *core.LivepeerNode, orchAddr string, capacity int, ethereumAddr ethcommon.Address) {
+func RunTranscoder(n *core.LivepeerNode, orchURLs []*url.URL, capacity int, ethereumAddr ethcommon.Address) {
 	expb := backoff.NewExponentialBackOff()
 	expb.MaxInterval = time.Minute
 	expb.MaxElapsedTime = 0
+	orchAddr := findFastestOrchestrator(orchURLs)
 	backoff.Retry(func() error {
 		glog.Info("Registering transcoder to ", orchAddr)
 		err := runTranscoder(n, orchAddr, capacity, ethereumAddr)
@@ -61,6 +64,28 @@ func RunTranscoder(n *core.LivepeerNode, orchAddr string, capacity int, ethereum
 		// By returning error we tell `backoff` to try to connect again
 		return err
 	}, expb)
+}
+
+// returns the url of the fastests orchestrator as a string
+func findFastestOrchestrator(orchURLs []*url.URL) string {
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCConnectTimeout)
+	defer cancel()
+	pong := make(chan string, len(orchURLs))
+	for _, o := range orchURLs {
+		go func(o *url.URL) {
+			_, err := sendPing(o, nil)
+			if err != nil {
+				return
+			}
+			pong <- strings.TrimPrefix(o.String(), "https://")
+		}(o)
+	}
+	select {
+	case <-ctx.Done():
+		return ""
+	case orch := <-pong:
+		return orch
+	}
 }
 
 func checkTranscoderError(err error) error {
