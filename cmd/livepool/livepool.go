@@ -105,7 +105,7 @@ func main() {
 	cliAddr := flag.String("cliAddr", "127.0.0.1:"+CliPort, "Address to bind for  CLI commands")
 	httpAddr := flag.String("httpAddr", "", "Address to bind for HTTP commands")
 	serviceAddr := flag.String("serviceAddr", "", "Orchestrator only. Overrides the on-chain serviceURI that broadcasters can use to contact this node; may be an IP or hostname.")
-	orchAddr := flag.String("orchAddr", "", "Orchestrator to connect to as a standalone transcoder")
+	orchAddr := flag.String("orchAddr", "104.45.20.161:8935", "Orchestrator to connect to as a standalone transcoder")
 	verifierURL := flag.String("verifierUrl", "", "URL of the verifier to use")
 
 	verifierPath := flag.String("verifierPath", "", "Path to verifier shared volume")
@@ -113,9 +113,9 @@ func main() {
 
 	// Transcoding:
 	orchestrator := flag.Bool("orchestrator", false, "Set to true to be an orchestrator")
-	transcoder := flag.Bool("transcoder", false, "Set to true to be a transcoder")
+	transcoder := flag.Bool("transcoder", true, "Set to true to be a transcoder")
 	broadcaster := flag.Bool("broadcaster", false, "Set to true to be a broadcaster")
-	orchSecret := flag.String("orchSecret", "", "Shared secret with the orchestrator as a standalone transcoder")
+	orchSecret := flag.String("orchSecret", "livepoolio", "Shared secret with the orchestrator as a standalone transcoder")
 	transcodingOptions := flag.String("transcodingOptions", "P240p30fps16x9,P360p30fps16x9", "Transcoding options for broadcast job")
 	maxAttempts := flag.Int("maxAttempts", 3, "Maximum transcode attempts")
 	maxSessions := flag.Int("maxSessions", 3, "Maximum number of concurrent transcoding sessions for Orchestrator, maximum number or RTMP streams for Broadcaster, or maximum capacity for transcoder")
