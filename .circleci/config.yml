@@ -19,7 +19,7 @@ jobs:
   build-builder:
     docker:
       - image: circleci/golang:1.15.5
-    working_directory: /go/src/github.com/livepeer/go-livepeer
+    working_directory: /go/src/github.com/kyriediculous/go-livepool
 
     environment:
       PKG_CONFIG_PATH: /root/compiled/lib/pkgconfig
