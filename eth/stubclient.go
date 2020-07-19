@@ -54,6 +54,8 @@ func (m *MockClient) TranscoderPool() ([]*lpTypes.Transcoder, error) {
 	return args.Get(0).([]*lpTypes.Transcoder), args.Error(1)
 }
 
+func (m *MockClient) SendEth(amount *big.Int, to ethcommon.Address) error { return nil }
+
 // GetTranscoderPoolMaxSize returns the max size of the active set
 func (m *MockClient) GetTranscoderPoolMaxSize() (*big.Int, error) {
 	args := m.Called()
@@ -385,3 +387,5 @@ func (c *StubClient) NextValidRequest(common.Address) (*big.Int, error) { return
 func (c *StubClient) Vote(pollAddr ethcommon.Address, choiceID *big.Int) (*types.Transaction, error) {
 	return &types.Transaction{}, c.Err
 }
+
+func (e *StubClient) SendEth(amount *big.Int, to ethcommon.Address) error { return nil }

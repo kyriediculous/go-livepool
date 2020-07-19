@@ -1462,7 +1462,7 @@ func (s *LivepeerServer) GetNodeStatus() *net.NodeStatus {
 		GOArch:                runtime.GOARCH,
 		GOOS:                  runtime.GOOS,
 		OrchestratorPool:      []string{},
-		RegisteredTranscoders: []net.RemoteTranscoderInfo{},
+		RegisteredTranscoders: []*net.RemoteTranscoderInfo{},
 		LocalTranscoding:      s.LivepeerNode.TranscoderManager == nil,
 	}
 	for k, v := range s.internalManifests {
