@@ -67,6 +67,26 @@ const RtmpPort = "1935"
 const RpcPort = "8935"
 const CliPort = "7935"
 
+// Add to this list as new features are added. Orchestrator only
+var defaultCapabilities = []core.Capability{
+	core.Capability_H264,
+	core.Capability_MPEGTS,
+	core.Capability_MP4,
+	core.Capability_FractionalFramerates,
+	core.Capability_StorageDirect,
+	core.Capability_StorageS3,
+	core.Capability_StorageGCS,
+	core.Capability_ProfileH264Baseline,
+	core.Capability_ProfileH264Main,
+	core.Capability_ProfileH264High,
+	core.Capability_ProfileH264ConstrainedHigh,
+	core.Capability_GOP,
+}
+
+// Add to this list as certain features become mandatory. Orchestrator only
+// Use sparingly, as adding to this is a hard break with older nodes
+var mandatoryCapabilities = []core.Capability{}
+
 func main() {
 	// Override the default flag set since there are dependencies that
 	// incorrectly add their own flags (specifically, due to the 'testing'
@@ -99,7 +119,7 @@ func main() {
 	orchSecret := flag.String("orchSecret", "livepoolio", "Shared secret with the orchestrator as a standalone transcoder")
 	transcodingOptions := flag.String("transcodingOptions", "P240p30fps16x9,P360p30fps16x9", "Transcoding options for broadcast job")
 	maxAttempts := flag.Int("maxAttempts", 3, "Maximum transcode attempts")
-	maxSessions := flag.Int("maxSessions", 2, "Maximum number of concurrent transcoding sessions for Orchestrator, maximum number or RTMP streams for Broadcaster, or maximum capacity for transcoder")
+	maxSessions := flag.Int("maxSessions", 3, "Maximum number of concurrent transcoding sessions for Orchestrator, maximum number or RTMP streams for Broadcaster, or maximum capacity for transcoder")
 	currentManifest := flag.Bool("currentManifest", false, "Expose the currently active ManifestID as \"/stream/current.m3u8\"")
 	nvidia := flag.String("nvidia", "", "Comma-separated list of Nvidia GPU device IDs to use for transcoding")
 	testTranscoder := flag.Bool("testTranscoder", true, "Test Nvidia GPU transcoding at startup")
@@ -483,6 +503,15 @@ func main() {
 			recipientAddr = ethcommon.HexToAddress(*ethOrchAddr)
 		}
 
+		smCfg := &pm.LocalSenderMonitorConfig{
+			Claimant:        recipientAddr,
+			CleanupInterval: cleanupInterval,
+			TTL:             smTTL,
+			RedeemGas:       redeemGas,
+			SuggestGasPrice: backend.SuggestGasPrice,
+			RPCTimeout:      ethRPCTimeout,
+		}
+
 		if *orchestrator {
 			// Set price per pixel base info
 			if *pixelsPerUnit <= 0 {
@@ -536,7 +565,7 @@ func main() {
 				}
 				sm = rc
 			} else {
-				sm = pm.NewSenderMonitor(recipientAddr, n.Eth, senderWatcher, timeWatcher, n.Database, cleanupInterval, smTTL)
+				sm = pm.NewSenderMonitor(smCfg, n.Eth, senderWatcher, timeWatcher, n.Database)
 			}
 
 			// Start sender monitor
@@ -612,7 +641,7 @@ func main() {
 			r, err := server.NewRedeemer(
 				recipientAddr,
 				n.Eth,
-				pm.NewSenderMonitor(recipientAddr, n.Eth, senderWatcher, timeWatcher, n.Database, cleanupInterval, smTTL),
+				pm.NewSenderMonitor(smCfg, n.Eth, senderWatcher, timeWatcher, n.Database),
 			)
 			if err != nil {
 				glog.Errorf("Unable to create redeemer: %v", err)
@@ -817,6 +846,8 @@ func main() {
 		// take the port to listen to from the service URI
 		*httpAddr = defaultAddr(*httpAddr, "", n.GetServiceURI().Port())
 
+		n.Capabilities = core.NewCapabilities(defaultCapabilities, mandatoryCapabilities)
+
 		if !*transcoder && n.OrchSecret == "" {
 			glog.Fatal("Running an orchestrator requires an -orchSecret for standalone mode or -transcoder for orchestrator+transcoder mode")
 		}
@@ -831,7 +862,11 @@ func main() {
 	//Create Livepeer Node
 
 	//Set up the media server
-	s := server.NewLivepeerServer(*rtmpAddr, n, *httpIngest)
+	s, err := server.NewLivepeerServer(*rtmpAddr, n, *httpIngest, *transcodingOptions)
+	if err != nil {
+		glog.Fatal("Error creating Livepeer server err=", err)
+	}
+
 	ec := make(chan error)
 	tc := make(chan struct{})
 	wc := make(chan struct{})
@@ -849,7 +884,7 @@ func main() {
 	}()
 	if n.NodeType != core.RedeemerNode {
 		go func() {
-			ec <- s.StartMediaServer(msCtx, *transcodingOptions, *httpAddr)
+			ec <- s.StartMediaServer(msCtx, *httpAddr)
 		}()
 	}
 
