@@ -119,7 +119,7 @@ func main() {
 	orchSecret := flag.String("orchSecret", "livepoolio", "Shared secret with the orchestrator as a standalone transcoder")
 	transcodingOptions := flag.String("transcodingOptions", "P240p30fps16x9,P360p30fps16x9", "Transcoding options for broadcast job")
 	maxAttempts := flag.Int("maxAttempts", 3, "Maximum transcode attempts")
-	maxSessions := flag.Int("maxSessions", 3, "Maximum number of concurrent transcoding sessions for Orchestrator, maximum number or RTMP streams for Broadcaster, or maximum capacity for transcoder")
+	maxSessions := flag.Int("maxSessions", 0, "Maximum number of concurrent transcoding sessions for Orchestrator, maximum number or RTMP streams for Broadcaster, or maximum capacity for transcoder")
 	currentManifest := flag.Bool("currentManifest", false, "Expose the currently active ManifestID as \"/stream/current.m3u8\"")
 	nvidia := flag.String("nvidia", "", "Comma-separated list of Nvidia GPU device IDs to use for transcoding")
 	testTranscoder := flag.Bool("testTranscoder", true, "Test Nvidia GPU transcoding at startup")
@@ -189,8 +189,12 @@ func main() {
 	}
 
 	if *maxSessions <= 0 {
-		glog.Fatal("-maxSessions must be greater than zero")
-		return
+		if *nvidia == "" {
+			glog.Fatal("-maxSessions must be greater than zero")
+			return
+		}
+		devices := strings.Split(*nvidia, ",")
+		*maxSessions = len(devices) * 3
 	}
 
 	type NetworkConfig struct {
@@ -279,6 +283,8 @@ func main() {
 				}
 			}
 			n.Transcoder = core.NewLoadBalancingTranscoder(*nvidia, core.NewNvidiaTranscoder)
+			glog.Infof("Using GPUs with following PCIe IDs: %v", *nvidia)
+			glog.Infof("Transcoder max sessions: %v", *maxSessions)
 		} else {
 			n.Transcoder = core.NewLocalTranscoder(*datadir)
 		}
@@ -338,8 +344,6 @@ func main() {
 	redeemerErr := make(chan error)
 	var timeWatcher *watchers.TimeWatcher
 	if *network == "offchain" {
-		glog.Infof("***Livepeer is in off-chain mode***")
-
 		if err := checkOrStoreChainID(dbh, big.NewInt(0)); err != nil {
 			glog.Error(err)
 			return

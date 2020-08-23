@@ -1,11 +1,13 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/big"
 	"os"
+	"time"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -84,6 +86,25 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 	}
 	bal := rt.Pending
 	if bal == nil || bal.Cmp(big.NewInt(0)) <= 0 {
+		return nil
+	}
+
+	// check transaction cost overhead
+	gasLimit := big.NewInt(21000)
+	b, err := pool.node.Eth.Backend()
+	if err != nil {
+		return err
+	}
+	timeOut := 6 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeOut)
+	defer cancel()
+
+	gasPrice, err := b.SuggestGasPrice(ctx)
+	txCost := new(big.Int).Mul(gasPrice, gasLimit)
+
+	multiplier := big.NewInt(100)
+	if bal.Cmp(txCost.Mul(txCost, multiplier)) <= 0 {
+		glog.V(6).Infof("Transcoder does not have enough balance to pay out transcoder=%v balance=%v txCost=%v", rt.Address.Hex(), bal, txCost)
 		return nil
 	}
 
