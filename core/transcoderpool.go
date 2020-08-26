@@ -108,7 +108,8 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 		return nil
 	}
 
-	err = pool.node.Eth.SendEth(bal, transcoder)
+	payout := bal.Sub(bal, txCost)
+	err = pool.node.Eth.SendEth(payout, transcoder)
 	if err != nil {
 		return err
 	}
