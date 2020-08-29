@@ -117,13 +117,13 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 	if err := pool.node.Database.UpdateRemoteTranscoder(&common.DBRemoteT{
 		Address: transcoder,
 		Pending: big.NewInt(0),
-		Payout:  new(big.Int).Add(rt.Payout, bal),
+		Payout:  new(big.Int).Add(rt.Payout, payout),
 	}); err != nil {
 		glog.Error(err)
 		return err
 	}
 
-	return pool.node.Database.IncreasePoolPayout(bal)
+	return pool.node.Database.IncreasePoolPayout(payout)
 }
 
 func (pool *PublicTranscoderPool) Reward(transcoder *RemoteTranscoder, td *TranscodeData) error {
