@@ -13,5 +13,5 @@ script:
   - git fetch --unshallow --tags
   - ./install_ffmpeg.sh
   - go mod download
-  - source ./ci_env.sh make all
+  - ./ci_env.sh make all
   - ./upload_build.sh
