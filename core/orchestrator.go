@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
+	"math/rand"
 	"net/url"
 	"os"
 	"path"
@@ -793,7 +794,9 @@ func (rtm *RemoteTranscoderManager) Manage(stream net.Transcoder_RegisterTransco
 	rtm.RTmutex.Lock()
 	rtm.liveTranscoders[transcoder.stream] = transcoder
 	rtm.remoteTranscoders = append(rtm.remoteTranscoders, transcoder)
+
 	sort.Sort(byLoadFactor(rtm.remoteTranscoders))
+
 	var totalLoad, totalCapacity, liveTranscodersNum int
 	if monitor.Enabled {
 		totalLoad, totalCapacity, liveTranscodersNum = rtm.totalLoadAndCapacity()
@@ -824,6 +827,14 @@ func (rtm *RemoteTranscoderManager) selectTranscoder() *RemoteTranscoder {
 	checkTranscoders := func(rtm *RemoteTranscoderManager) bool {
 		return len(rtm.remoteTranscoders) > 0
 	}
+
+	// shuffle and sort
+	rtms := make([]*RemoteTranscoder, len(rtm.remoteTranscoders))
+	for i, j := range rand.Perm(len(rtm.remoteTranscoders)) {
+		rtms[i] = rtm.remoteTranscoders[j]
+	}
+	sort.Sort(byLoadFactor(rtms))
+	rtm.remoteTranscoders = rtms
 
 	for checkTranscoders(rtm) {
 		last := len(rtm.remoteTranscoders) - 1
