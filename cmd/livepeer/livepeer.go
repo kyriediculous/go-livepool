@@ -595,8 +595,8 @@ func main() {
 				comissionRate := big.NewInt(int64(*poolCommission))
 				pool := core.NewPublicTranscoderPool(n, timeWatcher.SubscribeRounds, comissionRate)
 				n.TranscoderManager.Pool = pool
-				go pool.StartPayoutLoop()
-				defer pool.StopPayoutLoop()
+				// go pool.StartPayoutLoop()
+				// defer pool.StopPayoutLoop()
 			}
 		}
 
