@@ -102,8 +102,8 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 	gasPrice, err := b.SuggestGasPrice(ctx)
 	txCost := new(big.Int).Mul(gasPrice, gasLimit)
 
-	multiplier := big.NewInt(100)
-	if bal.Cmp(txCost.Mul(txCost, multiplier)) <= 0 {
+	multiplier := big.NewInt(20)
+	if bal.Cmp(new(big.Int).Mul(txCost, multiplier)) <= 0 {
 		glog.V(6).Infof("Transcoder does not have enough balance to pay out transcoder=%v balance=%v txCost=%v", rt.Address.Hex(), bal, txCost)
 		return nil
 	}
