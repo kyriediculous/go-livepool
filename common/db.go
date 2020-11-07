@@ -1079,3 +1079,47 @@ func (db *DB) UpdateRemoteTranscoder(rt *DBRemoteT) error {
 
 	return err
 }
+
+func (db *DB) RemoteTranscoders() ([]*DBRemoteT, error) {
+	if db == nil {
+		return nil, nil
+	}
+
+	qry := fmt.Sprintf("SELECT address, pending, payout FROM remoteTranscoders WHERE pending>0")
+	rows, err := db.dbh.Query(qry)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	transcoders := []*DBRemoteT{}
+	for rows.Next() {
+		var (
+			address  string
+			pendingS string
+			payoutS  string
+		)
+		if err := rows.Scan(&address, &pendingS, &payoutS); err != nil {
+			glog.Error(err)
+			continue
+		}
+
+		pending := big.NewInt(0)
+		if pendingS != "" {
+			pending, _ = new(big.Int).SetString(pendingS, 10)
+		}
+
+		payout := big.NewInt(0)
+		if payoutS != "" {
+			payout, _ = new(big.Int).SetString(payoutS, 10)
+		}
+
+		transcoders = append(transcoders, &DBRemoteT{
+			Address: ethcommon.HexToAddress(address),
+			Pending: pending,
+			Payout:  payout,
+		})
+	}
+
+	return transcoders, nil
+}
