@@ -123,6 +123,8 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 		return err
 	}
 
+	glog.Infof("Payed out %v to transcoder %v", payout, transcoder.Hex())
+
 	return pool.node.Database.IncreasePoolPayout(payout)
 }
 

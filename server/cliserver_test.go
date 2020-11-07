@@ -50,7 +50,7 @@ func TestActivateOrchestrator(t *testing.T) {
 	n.NodeType = core.TranscoderNode
 	n.TranscoderManager = core.NewRemoteTranscoderManager()
 	strm := &common.StubServerStream{}
-	go func() { n.TranscoderManager.Manage(strm, 5) }()
+	go func() { n.TranscoderManager.Manage(strm, 5, ethcommon.Address{}) }()
 	time.Sleep(1 * time.Millisecond)
 	n.Transcoder = n.TranscoderManager
 	s, _ := NewLivepeerServer("127.0.0.1:1938", n, true, "")
