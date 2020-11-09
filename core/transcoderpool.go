@@ -19,6 +19,8 @@ import (
 
 const payoutTicker = 1 * time.Hour
 
+const feeShare = 90
+
 var errPixelMismatch = errors.New("pixel mismatch")
 
 type PublicTranscoderPool struct {
@@ -143,7 +145,8 @@ func (pool *PublicTranscoderPool) Reward(transcoder *RemoteTranscoder, td *Trans
 	if err != nil {
 		return err
 	}
-	price := pool.node.GetBasePrice()
+	basePrice := pool.node.GetBasePrice()
+	price := new(big.Rat).Mul(basePrice, big.NewRat(feeShare, 100))
 	fees := new(big.Rat).Mul(price, big.NewRat(td.Pixels, 1))
 	commission := new(big.Rat).Mul(fees, big.NewRat(pool.commission.Int64(), 10000))
 	feesInt, ok := new(big.Int).SetString(fees.Sub(fees, commission).FloatString(0), 10)
