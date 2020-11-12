@@ -108,6 +108,9 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 	defer cancel()
 
 	gasPrice, err := b.SuggestGasPrice(ctx)
+	if err != nil {
+		return err
+	}
 	txCost := new(big.Int).Mul(gasPrice, gasLimit)
 
 	multiplier := big.NewInt(50)
