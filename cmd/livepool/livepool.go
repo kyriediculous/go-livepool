@@ -955,7 +955,7 @@ func main() {
 			glog.Fatal("Missing -orchSecret")
 		}
 		if len(orchURLs) > 0 {
-			server.RunTranscoder(n, orchURLs[0].Host, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
+			server.RunTranscoder(n, orchURLs, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
 		} else {
 			glog.Fatal("Missing -orchAddr")
 		}
