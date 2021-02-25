@@ -109,6 +109,7 @@ func main() {
 	verifierURL := flag.String("verifierUrl", "", "URL of the verifier to use")
 
 	verifierPath := flag.String("verifierPath", "", "Path to verifier shared volume")
+	localVerify := flag.Bool("localVerify", true, "Set to true to enable local verification i.e. pixel count and signature verification.")
 	httpIngest := flag.Bool("httpIngest", true, "Set to true to enable HTTP ingest")
 
 	// Transcoding:
@@ -157,7 +158,11 @@ func main() {
 	verbosity := flag.String("v", "", "Log verbosity.  {4|5|6}")
 
 	// Storage:
-	datadir := flag.String("datadir", "", "data directory")
+	datadir := flag.String("datadir", "", "Directory that data is stored in")
+	objectstore := flag.String("objectStore", "", "url of primary object store")
+	recordstore := flag.String("recordStore", "", "url of object store for recodings")
+
+	// All deprecated
 	s3bucket := flag.String("s3bucket", "", "S3 region/bucket (e.g. eu-central-1/testbucket)")
 	s3creds := flag.String("s3creds", "", "S3 credentials (in form ACCESSKEYID/ACCESSKEY)")
 	gsBucket := flag.String("gsbucket", "", "Google storage bucket")
