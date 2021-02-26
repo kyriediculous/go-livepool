@@ -260,17 +260,26 @@ func TestManageTranscoders(t *testing.T) {
 	go func() { m.Manage(strm2, 4, ethAddr2); wg2.Done() }()
 	time.Sleep(1 * time.Millisecond) // allow the manager to activate
 
+	ti1 := &net.RemoteTranscoderInfo{
+		Address:         "TestAddress",
+		Capacity:        5,
+		EthereumAddress: ethAddr,
+	}
+
+	ti2 := &net.RemoteTranscoderInfo{
+		Address:         "TestAddress",
+		Capacity:        4,
+		EthereumAddress: ethAddr2,
+	}
+
 	assert.NotNil(m.liveTranscoders[strm])
 	assert.NotNil(m.liveTranscoders[strm2])
 	assert.Len(m.liveTranscoders, 2)
 	assert.Len(m.remoteTranscoders, 2)
 	assert.Equal(2, m.RegisteredTranscodersCount())
 	ti = m.RegisteredTranscodersInfo()
-	assert.Equal(5, ti[0].Capacity)
-	assert.Equal("TestAddress", ti[0].Address)
-	assert.Equal(ethAddr, ti[0].EthereumAddress)
-	assert.Equal(4, ti[1].Capacity)
-	assert.Equal(ethAddr2, ti[1].EthereumAddress)
+	assert.Contains(ti, ti1)
+	assert.Contains(ti, ti2)
 
 	// test that transcoders are removed from liveTranscoders and remoteTranscoders
 	m.liveTranscoders[strm].eof <- struct{}{}
@@ -291,6 +300,14 @@ func TestManageTranscoders(t *testing.T) {
 }
 
 func TestSelectTranscoder(t *testing.T) {
+	oldShuffle := shuffleTranscoders
+	shuffleTranscoders = func(rts []*RemoteTranscoder) []*RemoteTranscoder {
+		return rts
+	}
+	defer func() {
+		shuffleTranscoders = oldShuffle
+	}()
+
 	m := NewRemoteTranscoderManager()
 	strm := &StubTranscoderServer{manager: m, WithholdResults: false}
 	strm2 := &StubTranscoderServer{manager: m}
