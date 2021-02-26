@@ -41,6 +41,15 @@ var transcodeLoopContext = func() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), transcodeLoopTimeout)
 }
 
+var shuffleTranscoders = func(remoteTranscoders []*RemoteTranscoder) []*RemoteTranscoder {
+	rtms := make([]*RemoteTranscoder, len(remoteTranscoders))
+	for i, j := range rand.Perm(len(remoteTranscoders)) {
+		rtms[i] = remoteTranscoders[j]
+	}
+	sort.Sort(byLoadFactor(rtms))
+	return rtms
+}
+
 // Transcoder / orchestrator RPC interface implementation
 type orchestrator struct {
 	address ethcommon.Address
@@ -856,12 +865,7 @@ func (rtm *RemoteTranscoderManager) selectTranscoder() *RemoteTranscoder {
 	}
 
 	// shuffle and sort
-	rtms := make([]*RemoteTranscoder, len(rtm.remoteTranscoders))
-	for i, j := range rand.Perm(len(rtm.remoteTranscoders)) {
-		rtms[i] = rtm.remoteTranscoders[j]
-	}
-	sort.Sort(byLoadFactor(rtms))
-	rtm.remoteTranscoders = rtms
+	rtm.remoteTranscoders = shuffleTranscoders(rtm.remoteTranscoders)
 
 	for checkTranscoders(rtm) {
 		last := len(rtm.remoteTranscoders) - 1
