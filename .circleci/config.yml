@@ -72,19 +72,30 @@ jobs:
     steps:
       - checkout
 
+      - setup_remote_docker
+
       - run: mkdir -p $TEST_RESULTS
-      - setup_remote_docker:
-          # This actually only exists for paid plans. But it's good luck!
-          docker_layer_caching: false
 
       - run:
           name: Lint
           command: |
             golangci-lint --disable-all --enable=gofmt --enable=vet --enable=golint --deadline=4m run pm verification
+      - run:
+          name: Run unit tests
+          command: |
+            trap "go-junit-report <${TEST_RESULTS}/go-test.out > ${TEST_RESULTS}/go-test-report.xml" EXIT
+            /bin/bash test.sh 2>&1 | tee $TEST_RESULTS/go-test.out
+      - run:
+          name: Localdocker build check
+          command: make localdocker
 
-    #  - run:
-    #      name: Upload build
-    #      command: ./upload_build.sh
+      - run:
+          name: Upload build
+          command: ./upload_build.sh
+
+      - run:
+          name: Notify that new build has been uploaded
+          command: curl -X POST https://holy-bread-207a.livepeer.workers.dev
 
       - save_cache:
           key: v3-pkg-cache
@@ -95,3 +106,5 @@ jobs:
             - "/home/circleci/x264/x264"
             - "/home/circleci/ffmpeg/libavcodec/libavcodec.a"
 
+      - store_test_results:
+          path: /tmp/test-results
