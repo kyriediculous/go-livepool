@@ -1,5 +1,7 @@
 # Verification
 
+#1
+
 The Livepeer node supports two types of verification when running with the `-broadcaster` flag:
 
 - Local verification
