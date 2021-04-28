@@ -630,6 +630,10 @@ func (n *LivepeerNode) transcodeSegmentLoop(md *SegTranscodingMetadata, segChan 
 				// timeout; clean up goroutine here
 				os.EndSession()
 				los.EndSession()
+				// check to avoid nil pointer caused by garbage collection while this go routine is still running
+				if n.TranscoderManager != nil {
+					n.TranscoderManager.completeStreamSession(md.AuthToken.SessionId)
+				}
 				glog.V(common.DEBUG).Infof("Segment loop timed out; closing manifestID=%s sessionID=%s", md.ManifestID, md.AuthToken.SessionId)
 				n.segmentMutex.Lock()
 				mid := ManifestID(md.AuthToken.SessionId)
@@ -687,6 +691,7 @@ func NewRemoteTranscoderFatalError(err error) error {
 }
 
 var ErrRemoteTranscoderTimeout = errors.New("Remote transcoder took too long")
+var ErrNoTranscodersAvailable = errors.New("no transcoders available")
 
 func (rt *RemoteTranscoder) done() {
 	// select so we don't block indefinitely if there's no listener
@@ -764,10 +769,12 @@ func NewRemoteTranscoderManager() *RemoteTranscoderManager {
 	return &RemoteTranscoderManager{
 		remoteTranscoders: []*RemoteTranscoder{},
 		liveTranscoders:   map[net.Transcoder_RegisterTranscoderServer]*RemoteTranscoder{},
-		RTmutex:           &sync.Mutex{},
+		RTmutex:           sync.Mutex{},
 
 		taskMutex: &sync.RWMutex{},
 		taskChans: make(map[int64]TranscoderChan),
+
+		streamSessions: make(map[string]*RemoteTranscoder),
 	}
 }
 
@@ -786,7 +793,7 @@ func (r byLoadFactor) Less(i, j int) bool {
 type RemoteTranscoderManager struct {
 	remoteTranscoders []*RemoteTranscoder
 	liveTranscoders   map[net.Transcoder_RegisterTranscoderServer]*RemoteTranscoder
-	RTmutex           *sync.Mutex
+	RTmutex           sync.Mutex
 
 	// For tracking tasks assigned to remote transcoders
 	taskMutex *sync.RWMutex
@@ -795,6 +802,9 @@ type RemoteTranscoderManager struct {
 
 	// Transcoder Pool Manager
 	Pool *PublicTranscoderPool
+
+	//Map for keeping track of sessions and their respective transcoders
+	streamSessions map[string]*RemoteTranscoder
 }
 
 // RegisteredTranscodersCount returns number of registered transcoders
@@ -851,12 +861,19 @@ func (rtm *RemoteTranscoderManager) Manage(stream net.Transcoder_RegisterTransco
 		totalLoad, totalCapacity, liveTranscodersNum = rtm.totalLoadAndCapacity()
 	}
 	rtm.RTmutex.Unlock()
+
+	// Remove all streamSessions assigned to this transcoder
+	for sessionId, assignedTranscoder := range rtm.streamSessions {
+		if assignedTranscoder == transcoder {
+			rtm.completeStreamSession(sessionId)
+		}
+	}
 	if monitor.Enabled {
 		monitor.SetTranscodersNumberAndLoad(totalLoad, totalCapacity, liveTranscodersNum)
 	}
 }
 
-func (rtm *RemoteTranscoderManager) selectTranscoder() *RemoteTranscoder {
+func (rtm *RemoteTranscoderManager) selectTranscoder(sessionId string) (*RemoteTranscoder, error) {
 	rtm.RTmutex.Lock()
 	defer rtm.RTmutex.Unlock()
 
@@ -868,8 +885,14 @@ func (rtm *RemoteTranscoderManager) selectTranscoder() *RemoteTranscoder {
 	rtm.remoteTranscoders = shuffleTranscoders(rtm.remoteTranscoders)
 
 	for checkTranscoders(rtm) {
+		currentTranscoder, sessionExists := rtm.streamSessions[sessionId]
+		if sessionExists {
+			return currentTranscoder, nil
+		}
+
 		last := len(rtm.remoteTranscoders) - 1
-		currentTranscoder := rtm.remoteTranscoders[last]
+		currentTranscoder = rtm.remoteTranscoders[last]
+
 		if _, ok := rtm.liveTranscoders[currentTranscoder.stream]; !ok {
 			// transcoder does not exist in table; remove and retry
 			rtm.remoteTranscoders = rtm.remoteTranscoders[:last]
@@ -877,26 +900,30 @@ func (rtm *RemoteTranscoderManager) selectTranscoder() *RemoteTranscoder {
 		}
 		if currentTranscoder.load == currentTranscoder.capacity {
 			// Head of queue is at capacity, so the rest must be too. Exit early
-			return nil
+			return nil, ErrNoTranscodersAvailable
 		}
+
+		// Assing transcoder to session for future use
+		rtm.streamSessions[sessionId] = currentTranscoder
 		currentTranscoder.load++
 		sort.Sort(byLoadFactor(rtm.remoteTranscoders))
-		return currentTranscoder
+		return currentTranscoder, nil
 	}
 
-	return nil
+	return nil, ErrNoTranscodersAvailable
 }
 
-func (rtm *RemoteTranscoderManager) completeTranscoders(trans *RemoteTranscoder) {
+func (rtm *RemoteTranscoderManager) completeStreamSession(sessionId string) {
 	rtm.RTmutex.Lock()
 	defer rtm.RTmutex.Unlock()
 
-	t, ok := rtm.liveTranscoders[trans.stream]
+	t, ok := rtm.streamSessions[sessionId]
 	if !ok {
 		return
 	}
 	t.load--
 	sort.Sort(byLoadFactor(rtm.remoteTranscoders))
+	delete(rtm.streamSessions, sessionId)
 }
 
 // Caller of this function should hold RTmutex lock
@@ -911,11 +938,14 @@ func (rtm *RemoteTranscoderManager) totalLoadAndCapacity() (int, int, int) {
 
 // Transcode does actual transcoding using remote transcoder from the pool
 func (rtm *RemoteTranscoderManager) Transcode(md *SegTranscodingMetadata) (*TranscodeData, error) {
-	currentTranscoder := rtm.selectTranscoder()
-	if currentTranscoder == nil {
-		return nil, errors.New("No transcoders available")
+	currentTranscoder, err := rtm.selectTranscoder(md.AuthToken.SessionId)
+	if err != nil {
+		return nil, err
 	}
 	res, err := currentTranscoder.Transcode(md)
+	if err != nil {
+		rtm.completeStreamSession(md.AuthToken.SessionId)
+	}
 	_, fatal := err.(RemoteTranscoderFatalError)
 	if fatal {
 		// Don't retry if we've timed out; broadcaster likely to have moved on
@@ -933,6 +963,5 @@ func (rtm *RemoteTranscoderManager) Transcode(md *SegTranscodingMetadata) (*Tran
 			}
 		}()
 	}
-	rtm.completeTranscoders(currentTranscoder)
 	return res, err
 }
