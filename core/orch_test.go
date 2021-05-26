@@ -400,8 +400,10 @@ func TestCompleteStreamSession(t *testing.T) {
 	testSessionId := "testID"
 	assert := assert.New(t)
 
+	ethAddr := ethcommon.HexToAddress("foo")
+
 	// register transcoders
-	go func() { m.Manage(strm, 1) }()
+	go func() { m.Manage(strm, 1, ethAddr) }()
 	time.Sleep(1 * time.Millisecond) // allow time for first stream to register
 	t1 := m.liveTranscoders[strm]
 

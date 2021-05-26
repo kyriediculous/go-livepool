@@ -1,4 +1,3 @@
-
 version: 2
 
 workflows:
@@ -56,7 +55,6 @@ jobs:
             docker manifest create livepool/go-livepool:${TAG} livepool/go-livepool:${TAG}-linux livepool/go-livepool:${TAG}-windows || true
             docker manifest push livepool/go-livepool:${TAG} || true
           done
-
   build:
     docker:
       # Note race condition - we might get the wrong builder if lots of builds are happening in

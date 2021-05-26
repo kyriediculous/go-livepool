@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/livepeer/go-livepeer/build"
 	"github.com/livepeer/go-livepeer/pm"
@@ -132,7 +133,7 @@ func main() {
 	ethUrl := flag.String("ethUrl", "", "Ethereum node JSON-RPC URL")
 	ethController := flag.String("ethController", "", "Protocol smart contract address")
 	gasLimit := flag.Int("gasLimit", 0, "Gas limit for ETH transactions")
-	gasPrice := flag.Int("gasPrice", 0, "Gas price for ETH transactions")
+	maxGasPrice := flag.Int("maxGasPrice", 0, "Maximum gas price for ETH transactions")
 	initializeRound := flag.Bool("initializeRound", false, "Set to true if running as a transcoder and the node should automatically initialize new rounds")
 	ticketEV := flag.String("ticketEV", "1000000000000", "The expected value for PM tickets")
 	// Broadcaster max acceptable ticket EV
@@ -162,12 +163,6 @@ func main() {
 	objectstore := flag.String("objectStore", "", "url of primary object store")
 	recordstore := flag.String("recordStore", "", "url of object store for recodings")
 
-	// All deprecated
-	s3bucket := flag.String("s3bucket", "", "S3 region/bucket (e.g. eu-central-1/testbucket)")
-	s3creds := flag.String("s3creds", "", "S3 credentials (in form ACCESSKEYID/ACCESSKEY)")
-	gsBucket := flag.String("gsbucket", "", "Google storage bucket")
-	gsKey := flag.String("gskey", "", "Google Storage private key file name (in json format)")
-
 	// API
 	authWebhookURL := flag.String("authWebhookUrl", "", "RTMP authentication webhook URL")
 	orchWebhookURL := flag.String("orchWebhookUrl", "", "Orchestrator discovery callback URL")
@@ -193,16 +188,13 @@ func main() {
 	}
 
 	if *maxSessions <= 0 {
-		if *nvidia == "" {
-			glog.Fatal("-maxSessions must be greater than zero")
-			return
-		}
-		devices := strings.Split(*nvidia, ",")
-		*maxSessions = len(devices) * 3
+		glog.Fatal("-maxSessions must be greater than zero")
+		return
 	}
 
 	type NetworkConfig struct {
 		ethController string
+		minGasPrice   *big.Int
 	}
 
 	ctx := context.Background()
@@ -213,6 +205,7 @@ func main() {
 		},
 		"mainnet": {
 			ethController: "0xf96d54e490317c557a967abfa5d6e33006be69b3",
+			minGasPrice:   big.NewInt(int64(params.GWei)),
 		},
 	}
 
@@ -235,9 +228,11 @@ func main() {
 	}
 
 	// Setting config options based on specified network
+	var minGasPrice = big.NewInt(0)
 	if netw, ok := configOptions[*network]; ok {
 		if *ethController == "" {
 			*ethController = netw.ethController
+			minGasPrice = netw.minGasPrice
 		}
 		glog.Infof("***Livepeer is running on the %v network: %v***", *network, *ethController)
 	} else {
@@ -280,15 +275,21 @@ func main() {
 	if *transcoder {
 		core.WorkDir = *datadir
 		if *nvidia != "" {
+			// Get a list of device ids
+			devices, err := common.ParseNvidiaDevices(*nvidia)
+			if err != nil {
+				glog.Fatalf("Error while parsing '-nvidia %v' flag: %v", *nvidia, err)
+			}
+			glog.Infof("Transcoding on these Nvidia GPUs: %v", devices)
+			// Test transcoding with nvidia
 			if *testTranscoder {
-				err := core.TestNvidiaTranscoder(*nvidia)
+				err := core.TestNvidiaTranscoder(devices)
 				if err != nil {
-					glog.Fatalf("Unable to transcode using Nvidia gpu=%s err=%v", *nvidia, err)
+					glog.Fatalf("Unable to transcode using Nvidia gpu=%s err=%v", strings.Join(devices, ","), err)
 				}
 			}
-			n.Transcoder = core.NewLoadBalancingTranscoder(*nvidia, core.NewNvidiaTranscoder)
-			glog.Infof("Using GPUs with following PCIe IDs: %v", *nvidia)
-			glog.Infof("Transcoder max sessions: %v", *maxSessions)
+			// Initialize LB transcoder
+			n.Transcoder = core.NewLoadBalancingTranscoder(devices, core.NewNvidiaTranscoder)
 		} else {
 			n.Transcoder = core.NewLocalTranscoder(*datadir)
 		}
@@ -337,6 +338,8 @@ func main() {
 	serviceErr := make(chan error)
 	var timeWatcher *watchers.TimeWatcher
 	if *network == "offchain" {
+		glog.Infof("***Livepeer is in off-chain mode***")
+
 		if err := checkOrStoreChainID(dbh, big.NewInt(0)); err != nil {
 			glog.Error(err)
 			return
@@ -383,20 +386,19 @@ func main() {
 			return
 		}
 
-		client, err := eth.NewClient(ethcommon.HexToAddress(*ethAcctAddr), keystoreDir, backend, ethcommon.HexToAddress(*ethController), EthTxTimeout)
+		var bigMaxGasPrice *big.Int
+		if *maxGasPrice > 0 {
+			bigMaxGasPrice = big.NewInt(int64(*maxGasPrice))
+		}
+
+		client, err := eth.NewClient(ethcommon.HexToAddress(*ethAcctAddr), keystoreDir, *ethPassword, backend, ethcommon.HexToAddress(*ethController), EthTxTimeout, bigMaxGasPrice)
 		if err != nil {
-			glog.Errorf("Failed to create client: %v", err)
+			glog.Errorf("Failed to create Livepeer Ethereum client: %v", err)
 			return
 		}
 
-		var bigGasPrice *big.Int
-		if *gasPrice > 0 {
-			bigGasPrice = big.NewInt(int64(*gasPrice))
-		}
-
-		err = client.Setup(*ethPassword, uint64(*gasLimit), bigGasPrice)
-		if err != nil {
-			glog.Errorf("Failed to setup client: %v", err)
+		if err := client.SetGasInfo(uint64(*gasLimit)); err != nil {
+			glog.Errorf("Failed to set gas info on Livepeer Ethereum Client: %v", err)
 			return
 		}
 
@@ -546,7 +548,7 @@ func main() {
 
 			sigVerifier := &pm.DefaultSigVerifier{}
 			validator := pm.NewValidator(sigVerifier, timeWatcher)
-			gpm := eth.NewGasPriceMonitor(backend, blockPollingTime)
+			gpm := eth.NewGasPriceMonitor(backend, blockPollingTime, minGasPrice)
 			// Start gas price monitor
 			_, err := gpm.Start(ctx)
 			if err != nil {
@@ -595,8 +597,8 @@ func main() {
 				comissionRate := big.NewInt(int64(*poolCommission))
 				pool := core.NewPublicTranscoderPool(n, timeWatcher.SubscribeRounds, comissionRate)
 				n.TranscoderManager.Pool = pool
-				go pool.StartPayoutLoop()
-				defer pool.StopPayoutLoop()
+				// go pool.StartPayoutLoop()
+				// defer pool.StopPayoutLoop()
 			}
 		}
 
@@ -731,41 +733,6 @@ func main() {
 		}()
 	}
 
-	if *s3bucket != "" && *s3creds == "" || *s3bucket == "" && *s3creds != "" {
-		glog.Error("Should specify both s3bucket and s3creds")
-		return
-	}
-	if *gsBucket != "" && *gsKey == "" || *gsBucket == "" && *gsKey != "" {
-		glog.Error("Should specify both gsbucket and gskey")
-		return
-	}
-
-	// XXX get s3 credentials from local env vars?
-	if *s3bucket != "" && *s3creds != "" {
-		br := strings.Split(*s3bucket, "/")
-		cr := strings.Split(*s3creds, "/")
-		u := url.URL{
-			Scheme: "s3",
-			Host:   br[0],
-			Path:   fmt.Sprintf("/%s", br[1]),
-			User:   url.UserPassword(cr[0], cr[1]),
-		}
-		glog.Warningf("-s3bucket and -s3creds are deprecated. Instead, you can use -objectStore %s", u.String())
-		ustr := u.String()
-		objectstore = &ustr
-	}
-
-	if *gsBucket != "" && *gsKey != "" {
-		u := url.URL{
-			Scheme:   "gs",
-			Host:     *gsBucket,
-			RawQuery: fmt.Sprintf("keyfile=%s", *gsKey),
-		}
-		glog.Warningf("-gsbucket and -gskey are deprecated. Instead, you can use -objectStore %s", u.String())
-		ustr := u.String()
-		objectstore = &ustr
-	}
-
 	if *objectstore != "" {
 		prepared, err := drivers.PrepareOSURL(*objectstore)
 		if err != nil {
@@ -872,7 +839,7 @@ func main() {
 			// Set the verifier path. Remove once [1] is implemented!
 			// [1] https://github.com/livepeer/verification-classifier/issues/64
 			if drivers.NodeStorage == nil && *verifierPath == "" {
-				glog.Fatal("Requires a path to the verifier shared volume when local storage is in use; use -verifierPath, S3 or GCS")
+				glog.Fatal("Requires a path to the verifier shared volume when local storage is in use; use -verifierPath or -objectStore")
 			}
 			verification.VerifierPath = *verifierPath
 		} else if *localVerify {
@@ -1055,17 +1022,21 @@ func getServiceURI(n *core.LivepeerNode, serviceAddr string) (*url.URL, error) {
 	// TODO probably should put this (along w wizard GETs) into common code
 	resp, err := http.Get("https://api.ipify.org?format=text")
 	if err != nil {
-		glog.Error("Could not look up public IP address")
+		glog.Errorf("Could not look up public IP err=%v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		glog.Error("Could not look up public IP address")
+		glog.Errorf("Could not look up public IP err=%v", err)
 		return nil, err
 	}
 	addr := "https://" + strings.TrimSpace(string(body)) + ":" + RpcPort
 	inferredUri, err := url.ParseRequestURI(addr)
+	if err != nil {
+		glog.Errorf("Could not look up public IP err=%v", err)
+		return nil, err
+	}
 	if n.Eth == nil {
 		// we won't be looking up onchain sURI so use the inferred one
 		return inferredUri, err
@@ -1074,12 +1045,12 @@ func getServiceURI(n *core.LivepeerNode, serviceAddr string) (*url.URL, error) {
 	// On-chain lookup and matching with inferred public address
 	addr, err = n.Eth.GetServiceURI(n.Eth.Account().Address)
 	if err != nil {
-		glog.Error("Could not get service URI; orchestrator may be unreachable")
+		glog.Errorf("Could not get service URI; orchestrator may be unreachable err=%v", err)
 		return nil, err
 	}
 	ethUri, err := url.ParseRequestURI(addr)
 	if err != nil {
-		glog.Error("Could not parse service URI; orchestrator may be unreachable")
+		glog.Errorf("Could not parse service URI; orchestrator may be unreachable err=%v", err)
 		ethUri, _ = url.ParseRequestURI("http://127.0.0.1:" + RpcPort)
 	}
 	if ethUri.Hostname() != inferredUri.Hostname() || ethUri.Port() != inferredUri.Port() {
