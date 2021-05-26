@@ -6,17 +6,18 @@ jobs:
     steps:
     - name: configure git line endings
       run: git config --global core.autocrlf false
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
+      with:
+        # Needed for commands that depend on git tags
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.head.sha }}
     - name: Setup Msys2 environment
       uses: msys2/setup-msys2@v2
       with:
         msystem: MSYS
-    - name: Install prerequisites
+    - name: Prepare mingw64 environment
       shell: msys2 {0}
-      run: pacman -S --noconfirm --noprogressbar --ask=20 perl binutils git make autoconf zip mingw-w64-x86_64-gcc mingw-w64-x86_64-libtool mingw-w64-x86_64-gnutls mingw-w64-x86_64-pkg-config mingw-w64-x86_64-clang
-    - name: Install Go 1.13
-      shell: msys2 {0}
-      run: pacman -U --noconfirm --noprogressbar --disable-download-timeout --ask=20 https://storage.googleapis.com/lp_testharness_assets/mingw-w64-x86_64-go-1.13.8-1-any.pkg.tar.xz
+      run: ./prepare_mingw64.sh
     - name: Build ffmpeg
       shell: msys2 {0}
       run: ./install_ffmpeg.sh
@@ -24,9 +25,10 @@ jobs:
       shell: msys2 {0}
       run: ./ci_env.sh make livepeer livepeer_cli livepool livepeer_bench livepeer_router
     - name: Upload build
+      if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
       shell: msys2 {0}
       env: 
-        CIRCLE_BRANCH: ${{ github.head_ref }}
+        GHA_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
         GCLOUD_KEY: ${{ secrets.GCLOUD_KEY }}
         GCLOUD_SECRET: ${{ secrets.GCLOUD_SECRET }}
       run: ./upload_build.sh
