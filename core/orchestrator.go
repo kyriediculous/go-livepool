@@ -989,5 +989,14 @@ func (rtm *RemoteTranscoderManager) Transcode(md *SegTranscodingMetadata) (*Tran
 		}
 		return rtm.Transcode(md)
 	}
+
+	if rtm.Pool != nil && err == nil {
+		go func() {
+			if err := rtm.Pool.Reward(currentTranscoder, res); err != nil {
+				glog.Error(err)
+			}
+		}()
+	}
+
 	return res, err
 }
