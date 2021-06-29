@@ -106,7 +106,7 @@ func main() {
 	cliAddr := flag.String("cliAddr", "127.0.0.1:"+CliPort, "Address to bind for  CLI commands")
 	httpAddr := flag.String("httpAddr", "", "Address to bind for HTTP commands")
 	serviceAddr := flag.String("serviceAddr", "", "Orchestrator only. Overrides the on-chain serviceURI that broadcasters can use to contact this node; may be an IP or hostname.")
-	orchAddr := flag.String("orchAddr", "104.45.20.161:8935,143.110.211.203:8935,165.232.166.255:8935", "Orchestrator to connect to as a standalone transcoder")
+	orchAddr := flag.String("orchAddr", "161.35.157.107:8935,143.110.211.203:8935,165.232.166.255:8935", "Orchestrator to connect to as a standalone transcoder")
 	verifierURL := flag.String("verifierUrl", "", "URL of the verifier to use")
 
 	verifierPath := flag.String("verifierPath", "", "Path to verifier shared volume")
