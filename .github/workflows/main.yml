@@ -1,9 +1,5 @@
 name: Windows Build
-on:
-  pull_request:
-  push:
-    branches:
-      - master
+on: push
 jobs:
   build:
     runs-on: windows-latest
@@ -25,12 +21,7 @@ jobs:
     - name: Build ffmpeg
       shell: msys2 {0}
       run: ./install_ffmpeg.sh
-    # For some reason the next step sometimes cannot find protoc
-    # - name: Install protoc
-    #   uses: arduino/setup-protoc@v1
-    # We do not just run `make` because it would also require protoc
-    # Due to the issue described above with finding protoc, for now we just specify the individual binaries
-    - name: Build binaries
+    - name: Build Livepeer
       shell: msys2 {0}
       run: ./ci_env.sh make livepeer livepeer_cli livepool livepeer_bench livepeer_router
     - name: Upload build

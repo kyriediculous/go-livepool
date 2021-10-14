@@ -1,0 +1,27 @@
+trigger:
+  branches:
+    include:
+    - transcoder
+
+pr:
+  branches:
+    include:
+    - transcoder
+  
+jobs:
+  - job: build_livepeer
+
+    timeoutInMinutes: 0 # <-- that means maximum
+
+    pool:
+      vmImage: "windows-2019"
+
+    steps:
+      - script: git config --global core.autocrlf false
+      - checkout: self
+      - powershell: |-
+          $Env:CIRCLE_BRANCH = "$(Build.SourceBranchName)"
+          $Env:GCLOUD_KEY = "$(GCLOUD_KEY)"
+          $Env:GCLOUD_SECRET = "$(GCLOUD_SECRET)"
+          ./windows-build.ps1
+        failOnStderr: false

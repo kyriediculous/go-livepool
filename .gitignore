@@ -19,6 +19,7 @@ eth/protocol
 # Our compiled binary
 /livepeer
 /livepeer_cli
+/livepool
 /livepeer_router
 /livepeer_bench
 

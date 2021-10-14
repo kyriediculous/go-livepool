@@ -1,6 +1,6 @@
 SHELL=/bin/bash
 
-all: net/lp_rpc.pb.go net/redeemer.pb.go net/redeemer_mock.pb.go core/test_segment.go livepeer livepeer_cli livepeer_router livepeer_bench
+all: net/lp_rpc.pb.go net/redeemer.pb.go net/redeemer_mock.pb.go core/test_segment.go livepeer livepool livepeer_cli livepeer_router livepeer_bench
 
 net/lp_rpc.pb.go: net/lp_rpc.proto
 	protoc -I=. --go_out=plugins=grpc:. $^
@@ -27,6 +27,10 @@ endif
 .PHONY: livepeer
 livepeer:
 	GO111MODULE=on CGO_LDFLAGS="$(cgo_ldflags)" go build -tags $(BUILD_TAGS) -ldflags="$(ldflags)" cmd/livepeer/*.go
+
+.PHONY: livepool
+livepool:
+	GO111MODULE=on CGO_LDFLAGS="$(cgo_ldflags)" go build -tags "$(HIGHEST_CHAIN_TAG)" -ldflags="$(ldflags)" cmd/livepool/*.go
 
 .PHONY: livepeer_cli
 livepeer_cli:
