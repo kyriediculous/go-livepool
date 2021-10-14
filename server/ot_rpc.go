@@ -265,7 +265,8 @@ func runTranscode(n *core.LivepeerNode, orchAddr string, httpc *http.Client, not
 
 func (h *lphttp) RegisterTranscoder(req *net.RegisterRequest, stream net.Transcoder_RegisterTranscoderServer) error {
 	from := common.GetConnectionAddr(stream.Context())
-	glog.Infof("Got a RegisterTranscoder request from transcoder=%s capacity=%d", from, req.Capacity)
+	ethAddress := ethcommon.BytesToAddress(req.EthereumAddress)
+	glog.Infof("Got a RegisterTranscoder request from transcoder=%s capacity=%d address=%v", from, req.Capacity, ethAddress)
 
 	if req.Secret != h.orchestrator.TranscoderSecret() {
 		glog.Info(errSecret.Error())
@@ -281,7 +282,7 @@ func (h *lphttp) RegisterTranscoder(req *net.RegisterRequest, stream net.Transco
 	}
 
 	// blocks until stream is finished
-	h.orchestrator.ServeTranscoder(stream, int(req.Capacity), ethcommon.BytesToAddress(req.EthereumAddress))
+	h.orchestrator.ServeTranscoder(stream, int(req.Capacity), ethAddress)
 	return nil
 }
 
