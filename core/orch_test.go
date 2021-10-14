@@ -73,35 +73,36 @@ func TestCurrentBlock(t *testing.T) {
 }
 
 func TestServeTranscoder(t *testing.T) {
+	assert := assert.New(t)
 	n, _ := NewLivepeerNode(nil, "", nil)
 	n.TranscoderManager = NewRemoteTranscoderManager()
 	strm := &StubTranscoderServer{}
 
 	// test that a transcoder was created
-	go n.serveTranscoder(strm, 5)
+	ethAddr := ethcommon.HexToAddress("foo")
+	go n.serveTranscoder(strm, 5, ethAddr)
 	time.Sleep(1 * time.Second)
 
-	tc, ok := n.TranscoderManager.liveTranscoders[strm]
-	if !ok {
-		t.Error("Unexpected transcoder type")
-	}
+	tm := n.TranscoderManager
+	tc, ok := tm.liveTranscoders[strm]
+	assert.True(ok)
+	assert.Equal(tc.ethereumAddr, ethAddr)
 
 	// test shutdown
 	tc.eof <- struct{}{}
 	time.Sleep(1 * time.Second)
 
 	// stream should be removed
-	_, ok = n.TranscoderManager.liveTranscoders[strm]
-	if ok {
-		t.Error("Unexpected transcoder presence")
-	}
+	_, ok = tm.liveTranscoders[strm]
+	assert.False(ok)
 }
 
 func TestRemoteTranscoder(t *testing.T) {
 	m := NewRemoteTranscoderManager()
+	ethAddr := ethcommon.HexToAddress("foo")
 	initTranscoder := func() (*RemoteTranscoder, *StubTranscoderServer) {
 		strm := &StubTranscoderServer{manager: m}
-		tc := NewRemoteTranscoder(m, strm, 5)
+		tc := NewRemoteTranscoder(m, strm, 5, ethAddr)
 		return tc, strm
 	}
 
@@ -111,6 +112,7 @@ func TestRemoteTranscoder(t *testing.T) {
 	if err != nil || string(res.Segments[0].Data) != "asdf" {
 		t.Error("Error transcoding ", err)
 	}
+	assert.Equal(t, tc.ethereumAddr, ethAddr)
 
 	// error on remote while transcoding
 	tc, strm = initTranscoder()
@@ -238,7 +240,8 @@ func TestManageTranscoders(t *testing.T) {
 
 	// test that transcoder is added to liveTranscoders and remoteTranscoders
 	wg1 := newWg(1)
-	go func() { m.Manage(strm, 5); wg1.Done() }()
+	ethAddr := ethcommon.HexToAddress("foo")
+	go func() { m.Manage(strm, 5, ethAddr); wg1.Done() }()
 	time.Sleep(1 * time.Millisecond) // allow the manager to activate
 
 	assert.NotNil(m.liveTranscoders[strm])
@@ -249,17 +252,34 @@ func TestManageTranscoders(t *testing.T) {
 	assert.Len(ti, 1)
 	assert.Equal(5, ti[0].Capacity)
 	assert.Equal("TestAddress", ti[0].Address)
+	assert.Equal(ethAddr, ti[0].EthereumAddress)
 
 	// test that additional transcoder is added to liveTranscoders and remoteTranscoders
 	wg2 := newWg(1)
-	go func() { m.Manage(strm2, 4); wg2.Done() }()
+	ethAddr2 := ethcommon.HexToAddress("bar")
+	go func() { m.Manage(strm2, 4, ethAddr2); wg2.Done() }()
 	time.Sleep(1 * time.Millisecond) // allow the manager to activate
+
+	ti1 := &net.RemoteTranscoderInfo{
+		Address:         "TestAddress",
+		Capacity:        5,
+		EthereumAddress: ethAddr,
+	}
+
+	ti2 := &net.RemoteTranscoderInfo{
+		Address:         "TestAddress",
+		Capacity:        4,
+		EthereumAddress: ethAddr2,
+	}
 
 	assert.NotNil(m.liveTranscoders[strm])
 	assert.NotNil(m.liveTranscoders[strm2])
 	assert.Len(m.liveTranscoders, 2)
 	assert.Len(m.remoteTranscoders, 2)
 	assert.Equal(2, m.RegisteredTranscodersCount())
+	ti = m.RegisteredTranscodersInfo()
+	assert.Contains(ti, ti1)
+	assert.Contains(ti, ti2)
 
 	// test that transcoders are removed from liveTranscoders and remoteTranscoders
 	m.liveTranscoders[strm].eof <- struct{}{}
@@ -280,6 +300,14 @@ func TestManageTranscoders(t *testing.T) {
 }
 
 func TestSelectTranscoder(t *testing.T) {
+	oldShuffle := shuffleTranscoders
+	shuffleTranscoders = func(rts []*RemoteTranscoder) []*RemoteTranscoder {
+		return rts
+	}
+	defer func() {
+		shuffleTranscoders = oldShuffle
+	}()
+
 	m := NewRemoteTranscoderManager()
 	strm := &StubTranscoderServer{manager: m, WithholdResults: false}
 	strm2 := &StubTranscoderServer{manager: m}
@@ -291,9 +319,11 @@ func TestSelectTranscoder(t *testing.T) {
 
 	// register transcoders, which adds transcoder to liveTranscoders and remoteTranscoders
 	wg := newWg(1)
-	go func() { m.Manage(strm, 1) }()
+	ethAddr := ethcommon.HexToAddress("foo")
+	go func() { m.Manage(strm, 1, ethAddr) }()
 	time.Sleep(1 * time.Millisecond) // allow time for first stream to register
-	go func() { m.Manage(strm2, 1); wg.Done() }()
+	ethAddr2 := ethcommon.HexToAddress("bar")
+	go func() { m.Manage(strm2, 1, ethAddr2); wg.Done() }()
 	time.Sleep(1 * time.Millisecond) // allow time for second stream to register
 
 	assert.NotNil(m.liveTranscoders[strm])
@@ -370,8 +400,10 @@ func TestCompleteStreamSession(t *testing.T) {
 	testSessionId := "testID"
 	assert := assert.New(t)
 
+	ethAddr := ethcommon.HexToAddress("foo")
+
 	// register transcoders
-	go func() { m.Manage(strm, 1) }()
+	go func() { m.Manage(strm, 1, ethAddr) }()
 	time.Sleep(1 * time.Millisecond) // allow time for first stream to register
 	t1 := m.liveTranscoders[strm]
 
@@ -447,7 +479,8 @@ func TestTranscoderManagerTranscoding(t *testing.T) {
 	assert.Equal(err, ErrNoTranscodersAvailable)
 
 	wg := newWg(1)
-	go func() { m.Manage(s, 5); wg.Done() }()
+	ethAddr := ethcommon.HexToAddress("foo")
+	go func() { m.Manage(s, 5, ethAddr); wg.Done() }()
 	time.Sleep(1 * time.Millisecond)
 
 	assert.Len(m.remoteTranscoders, 1) // sanity
@@ -488,7 +521,7 @@ func TestTranscoderManagerTranscoding(t *testing.T) {
 
 	// fatal error should not retry
 	wg.Add(1)
-	go func() { m.Manage(s, 5); wg.Done() }()
+	go func() { m.Manage(s, 5, ethAddr); wg.Done() }()
 	time.Sleep(1 * time.Millisecond)
 
 	assert.Len(m.remoteTranscoders, 1) // sanity check
@@ -588,6 +621,7 @@ type StubTranscoderServer struct {
 func (s *StubTranscoderServer) Send(n *net.NotifySegment) error {
 	res := RemoteTranscoderResult{
 		TranscodeData: &TranscodeData{
+			Pixels: 1000,
 			Segments: []*TranscodedSegmentData{
 				{Data: []byte("asdf")},
 			},

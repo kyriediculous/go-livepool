@@ -158,6 +158,10 @@ func main() {
 	orchWebhookURL := flag.String("orchWebhookUrl", "", "Orchestrator discovery callback URL")
 	detectionWebhookURL := flag.String("detectionWebhookUrl", "", "(Experimental) Detection results callback URL")
 
+	// Transcoder pool
+	publicTPool := flag.Bool("transcoderPool", false, "Set to true to enable a public transcoder pool")
+	poolCommission := flag.Int("poolCommission", 1, "Commision for the public transcoder pool in percentage points")
+
 	flag.Parse()
 	vFlag.Value.Set(*verbosity)
 
@@ -482,14 +486,14 @@ func main() {
 
 		timeWatcher, err = watchers.NewTimeWatcher(addrMap["RoundsManager"], blockWatcher, n.Eth)
 		if err != nil {
-			glog.Errorf("Failed to setup roundswatcher: %v", err)
+			glog.Errorf("Failed to setup timeWatcher: %v", err)
 			return
 		}
 
 		timeWatcherErr := make(chan error, 1)
 		go func() {
 			if err := timeWatcher.Watch(); err != nil {
-				timeWatcherErr <- fmt.Errorf("roundswatcher failed to start watching for events: %v", err)
+				timeWatcherErr <- fmt.Errorf("timeWatcher failed to start watching for events: %v", err)
 			}
 		}()
 		defer timeWatcher.Stop()
@@ -621,6 +625,14 @@ func main() {
 			if err != nil {
 				glog.Errorf("Error setting up PM recipient: %v", err)
 				return
+			}
+
+			if *publicTPool {
+				comissionRate := big.NewInt(int64(*poolCommission))
+				pool := core.NewPublicTranscoderPool(n, timeWatcher.SubscribeRounds, comissionRate)
+				n.TranscoderManager.Pool = pool
+				// go pool.StartPayoutLoop()
+				// defer pool.StopPayoutLoop()
 			}
 		}
 
@@ -982,14 +994,15 @@ func main() {
 	}()
 
 	if n.NodeType == core.TranscoderNode {
+		glog.Info("***Livepeer is in transcoder mode ***")
 		if n.OrchSecret == "" {
 			glog.Fatal("Missing -orchSecret")
 		}
-		if len(orchURLs) <= 0 {
+		if len(orchURLs) > 0 {
+			server.RunTranscoder(n, orchURLs, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
+		} else {
 			glog.Fatal("Missing -orchAddr")
 		}
-
-		go server.RunTranscoder(n, orchURLs[0].Host, *maxSessions)
 	}
 
 	switch n.NodeType {
