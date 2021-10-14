@@ -12,10 +12,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"os"
 	"os/signal"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -28,6 +30,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
+	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/livepeer/go-livepeer/clog"
 	"github.com/livepeer/go-livepeer/common"
 	"github.com/livepeer/go-livepeer/core"
@@ -42,18 +45,20 @@ const transcodingErrorMimeType = "livepeer/transcoding-error"
 var errSecret = errors.New("invalid secret")
 var errZeroCapacity = errors.New("zero capacity")
 var errInterrupted = errors.New("execution interrupted")
+var errNoEthAddress = errors.New("no ethereum address")
 
 // Standalone Transcoder
 
 // RunTranscoder is main routing of standalone transcoder
 // Exiting it will terminate executable
-func RunTranscoder(n *core.LivepeerNode, orchAddr string, capacity int) {
+func RunTranscoder(n *core.LivepeerNode, orchURLs []*url.URL, capacity int, ethereumAddr ethcommon.Address) {
 	expb := backoff.NewExponentialBackOff()
 	expb.MaxInterval = time.Minute
 	expb.MaxElapsedTime = 0
+	orchAddr := findFastestOrchestrator(orchURLs)
 	backoff.Retry(func() error {
 		glog.Info("Registering transcoder to ", orchAddr)
-		err := runTranscoder(n, orchAddr, capacity)
+		err := runTranscoder(n, orchAddr, capacity, ethereumAddr)
 		glog.Info("Unregistering transcoder: ", err)
 		if _, fatal := err.(core.RemoteTranscoderFatalError); fatal {
 			glog.Info("Terminating transcoder because of ", err)
@@ -63,6 +68,28 @@ func RunTranscoder(n *core.LivepeerNode, orchAddr string, capacity int) {
 		// By returning error we tell `backoff` to try to connect again
 		return err
 	}, expb)
+}
+
+// returns the url of the fastests orchestrator as a string
+func findFastestOrchestrator(orchURLs []*url.URL) string {
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCConnectTimeout)
+	defer cancel()
+	pong := make(chan string, len(orchURLs))
+	for _, o := range orchURLs {
+		go func(o *url.URL) {
+			_, err := sendPing(o, nil)
+			if err != nil {
+				return
+			}
+			pong <- strings.TrimPrefix(o.String(), "https://")
+		}(o)
+	}
+	select {
+	case <-ctx.Done():
+		return ""
+	case orch := <-pong:
+		return orch
+	}
 }
 
 func checkTranscoderError(err error) error {
@@ -81,7 +108,7 @@ func checkTranscoderError(err error) error {
 	return err
 }
 
-func runTranscoder(n *core.LivepeerNode, orchAddr string, capacity int) error {
+func runTranscoder(n *core.LivepeerNode, orchAddr string, capacity int, ethereumAddr ethcommon.Address) error {
 	tlsConfig := &tls.Config{InsecureSkipVerify: true}
 	conn, err := grpc.Dial(orchAddr,
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
@@ -96,11 +123,17 @@ func runTranscoder(n *core.LivepeerNode, orchAddr string, capacity int) error {
 	ctx, cancel := context.WithCancel(ctx)
 	// Silence linter
 	defer cancel()
-	r, err := c.RegisterTranscoder(ctx, &net.RegisterRequest{Secret: n.OrchSecret, Capacity: int64(capacity)})
+	r, err := c.RegisterTranscoder(ctx, &net.RegisterRequest{
+		Secret:          n.OrchSecret,
+		Capacity:        int64(capacity),
+		EthereumAddress: ethereumAddr.Bytes(),
+	})
 	if err := checkTranscoderError(err); err != nil {
 		glog.Error("Could not register transcoder to orchestrator ", err)
 		return err
 	}
+
+	glog.Info("Transcoder started")
 
 	// Catch interrupt signal to shut down transcoder
 	exitc := make(chan os.Signal)
@@ -295,9 +328,13 @@ func (h *lphttp) RegisterTranscoder(req *net.RegisterRequest, stream net.Transco
 		glog.Errorf("err=%q", errZeroCapacity.Error())
 		return errZeroCapacity
 	}
+	if req.EthereumAddress == nil {
+		glog.Info(errNoEthAddress.Error())
+		return errNoEthAddress
+	}
 
 	// blocks until stream is finished
-	h.orchestrator.ServeTranscoder(stream, int(req.Capacity))
+	h.orchestrator.ServeTranscoder(stream, int(req.Capacity), ethcommon.BytesToAddress(req.EthereumAddress))
 	return nil
 }
 

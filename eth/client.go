@@ -13,6 +13,7 @@ package eth
 //go:generate abigen --abi protocol/abi/LivepeerTokenFaucet.json --pkg contracts --type LivepeerTokenFaucet --out contracts/livepeerTokenFaucet.go
 //go:generate abigen --abi protocol/abi/Poll.json --pkg contracts --type Poll --out contracts/poll.go
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"sort"
@@ -116,6 +117,8 @@ type LivepeerEthClient interface {
 	Sign([]byte) ([]byte, error)
 	SignTypedData(apitypes.TypedData) ([]byte, error)
 	SetGasInfo(uint64) error
+
+	SendEth(amount *big.Int, to ethcommon.Address) error
 }
 
 type client struct {
@@ -921,4 +924,35 @@ func (c *client) Sign(msg []byte) ([]byte, error) {
 
 func (c *client) SignTypedData(typedData apitypes.TypedData) ([]byte, error) {
 	return c.accountManager.SignTypedData(typedData)
+}
+
+func (c *client) SendEth(amount *big.Int, to ethcommon.Address) error {
+	addr := c.Account().Address
+	nonce, err := c.backend.PendingNonceAt(context.Background(), addr)
+	if err != nil {
+		return err
+	}
+
+	gasLimit := uint64(21000) // in units
+
+	gasPrice, err := c.backend.SuggestGasPrice(context.Background())
+	if err != nil {
+		return err
+	}
+	if err != nil {
+		return err
+	}
+
+	tx := types.NewTransaction(nonce, to, amount, gasLimit, gasPrice, nil)
+
+	newSignedTx, err := c.accountManager.SignTx(tx)
+	if err != nil {
+		return err
+	}
+
+	if err := c.backend.SendTransaction(context.Background(), newSignedTx); err != nil {
+		return err
+	}
+
+	return c.CheckTx(newSignedTx)
 }

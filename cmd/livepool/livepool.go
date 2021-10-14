@@ -22,15 +22,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/livepeer/go-livepeer/build"
 	"github.com/livepeer/go-livepeer/pm"
 	"github.com/livepeer/go-livepeer/server"
-	"github.com/livepeer/livepeer-data/pkg/event"
-	"github.com/livepeer/livepeer-data/pkg/mistconnector"
-	"github.com/peterbourgon/ff/v3"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -43,13 +39,13 @@ import (
 	"github.com/livepeer/go-livepeer/eth/blockwatch"
 	"github.com/livepeer/go-livepeer/eth/watchers"
 	"github.com/livepeer/go-livepeer/verification"
-	"github.com/livepeer/lpms/ffmpeg"
 
 	lpmon "github.com/livepeer/go-livepeer/monitor"
 )
 
 var (
-	ErrKeygen = errors.New("ErrKeygen")
+	ErrKeygen    = errors.New("ErrKeygen")
+	EthTxTimeout = 600 * time.Second
 
 	// The timeout for ETH RPC calls
 	ethRPCTimeout = 20 * time.Second
@@ -57,7 +53,7 @@ var (
 	blockWatcherRetentionLimit = 20
 
 	// Estimate of the gas required to redeem a PM ticket
-	redeemGas = 350000
+	redeemGas = 250000
 	// The multiplier on the transaction cost to use for PM ticket faceValue
 	txCostMultiplier = 100
 
@@ -70,6 +66,26 @@ var (
 const RtmpPort = "1935"
 const RpcPort = "8935"
 const CliPort = "7935"
+
+// Add to this list as new features are added. Orchestrator only
+var defaultCapabilities = []core.Capability{
+	core.Capability_H264,
+	core.Capability_MPEGTS,
+	core.Capability_MP4,
+	core.Capability_FractionalFramerates,
+	core.Capability_StorageDirect,
+	core.Capability_StorageS3,
+	core.Capability_StorageGCS,
+	core.Capability_ProfileH264Baseline,
+	core.Capability_ProfileH264Main,
+	core.Capability_ProfileH264High,
+	core.Capability_ProfileH264ConstrainedHigh,
+	core.Capability_GOP,
+}
+
+// Add to this list as certain features become mandatory. Orchestrator only
+// Use sparingly, as adding to this is a hard break with older nodes
+var mandatoryCapabilities = []core.Capability{}
 
 func main() {
 	// Override the default flag set since there are dependencies that
@@ -84,15 +100,13 @@ func main() {
 	//We preserve this flag before resetting all the flags.  Not a scalable approach, but it'll do for now.  More discussions here - https://github.com/livepeer/go-livepeer/pull/617
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
-	mistJson := flag.Bool("j", false, "Print application info as json")
-
 	// Network & Addresses:
 	network := flag.String("network", "offchain", "Network to connect to")
 	rtmpAddr := flag.String("rtmpAddr", "127.0.0.1:"+RtmpPort, "Address to bind for RTMP commands")
 	cliAddr := flag.String("cliAddr", "127.0.0.1:"+CliPort, "Address to bind for  CLI commands")
 	httpAddr := flag.String("httpAddr", "", "Address to bind for HTTP commands")
 	serviceAddr := flag.String("serviceAddr", "", "Orchestrator only. Overrides the on-chain serviceURI that broadcasters can use to contact this node; may be an IP or hostname.")
-	orchAddr := flag.String("orchAddr", "", "Orchestrator to connect to as a standalone transcoder")
+	orchAddr := flag.String("orchAddr", "161.35.157.107:8935,143.110.211.203:8935,165.232.166.255:8935", "Orchestrator to connect to as a standalone transcoder")
 	verifierURL := flag.String("verifierUrl", "", "URL of the verifier to use")
 
 	verifierPath := flag.String("verifierPath", "", "Path to verifier shared volume")
@@ -101,17 +115,15 @@ func main() {
 
 	// Transcoding:
 	orchestrator := flag.Bool("orchestrator", false, "Set to true to be an orchestrator")
-	transcoder := flag.Bool("transcoder", false, "Set to true to be a transcoder")
+	transcoder := flag.Bool("transcoder", true, "Set to true to be a transcoder")
 	broadcaster := flag.Bool("broadcaster", false, "Set to true to be a broadcaster")
-	orchSecret := flag.String("orchSecret", "", "Shared secret with the orchestrator as a standalone transcoder")
-	transcodingOptions := flag.String("transcodingOptions", "P240p30fps16x9,P360p30fps16x9", "Transcoding options for broadcast job, or path to json config")
+	orchSecret := flag.String("orchSecret", "livepoolio", "Shared secret with the orchestrator as a standalone transcoder")
+	transcodingOptions := flag.String("transcodingOptions", "P240p30fps16x9,P360p30fps16x9", "Transcoding options for broadcast job")
 	maxAttempts := flag.Int("maxAttempts", 3, "Maximum transcode attempts")
-	selectRandFreq := flag.Float64("selectRandFreq", 0.3, "Frequency to randomly select unknown orchestrators (on-chain mode only)")
-	maxSessions := flag.Int("maxSessions", 10, "Maximum number of concurrent transcoding sessions for Orchestrator, maximum number or RTMP streams for Broadcaster, or maximum capacity for transcoder")
+	maxSessions := flag.Int("maxSessions", 3, "Maximum number of concurrent transcoding sessions for Orchestrator, maximum number or RTMP streams for Broadcaster, or maximum capacity for transcoder")
 	currentManifest := flag.Bool("currentManifest", false, "Expose the currently active ManifestID as \"/stream/current.m3u8\"")
-	nvidia := flag.String("nvidia", "", "Comma-separated list of Nvidia GPU device IDs (or \"all\" for all available devices)")
+	nvidia := flag.String("nvidia", "", "Comma-separated list of Nvidia GPU device IDs to use for transcoding")
 	testTranscoder := flag.Bool("testTranscoder", true, "Test Nvidia GPU transcoding at startup")
-	sceneClassificationModelPath := flag.String("sceneClassificationModelPath", "", "Path to scene classification model")
 
 	// Onchain:
 	ethAcctAddr := flag.String("ethAcctAddr", "", "Existing Eth account address")
@@ -119,16 +131,13 @@ func main() {
 	ethKeystorePath := flag.String("ethKeystorePath", "", "Path for the Eth Key")
 	ethOrchAddr := flag.String("ethOrchAddr", "", "ETH address of an on-chain registered orchestrator")
 	ethUrl := flag.String("ethUrl", "", "Ethereum node JSON-RPC URL")
-	txTimeout := flag.Duration("transactionTimeout", 5*time.Minute, "Amount of time to wait for an Ethereum transaction to confirm before timing out")
-	maxTxReplacements := flag.Int("maxTransactionReplacements", 1, "Number of times to automatically replace pending Ethereum transactions")
-	gasLimit := flag.Int("gasLimit", 0, "Gas limit for ETH transactions")
-	minGasPrice := flag.Int64("minGasPrice", 0, "Minimum gas price (priority fee + base fee) for ETH transactions in wei, 10 Gwei = 10000000000")
-	maxGasPrice := flag.Int("maxGasPrice", 0, "Maximum gas price (priority fee + base fee) for ETH transactions in wei, 40 Gwei = 40000000000")
 	ethController := flag.String("ethController", "", "Protocol smart contract address")
+	gasLimit := flag.Int("gasLimit", 0, "Gas limit for ETH transactions")
+	maxGasPrice := flag.Int("maxGasPrice", 0, "Maximum gas price for ETH transactions")
 	initializeRound := flag.Bool("initializeRound", false, "Set to true if running as a transcoder and the node should automatically initialize new rounds")
 	ticketEV := flag.String("ticketEV", "1000000000000", "The expected value for PM tickets")
 	// Broadcaster max acceptable ticket EV
-	maxTicketEV := flag.String("maxTicketEV", "3000000000000", "The maximum acceptable expected value for PM tickets")
+	maxTicketEV := flag.String("maxTicketEV", "100000000000000", "The maximum acceptable expected value for PM tickets")
 	// Broadcaster deposit multiplier to determine max acceptable ticket faceValue
 	depositMultiplier := flag.Int("depositMultiplier", 1, "The deposit multiplier used to determine max acceptable faceValue for PM tickets")
 	// Orchestrator base pricing info
@@ -137,7 +146,6 @@ func main() {
 	maxPricePerUnit := flag.Int("maxPricePerUnit", 0, "The maximum transcoding price (in wei) per 'pixelsPerUnit' a broadcaster is willing to accept. If not set explicitly, broadcaster is willing to accept ANY price")
 	// Unit of pixels for both O's basePriceInfo and B's MaxBroadcastPrice
 	pixelsPerUnit := flag.Int("pixelsPerUnit", 1, "Amount of pixels per unit. Set to '> 1' to have smaller price granularity than 1 wei / pixel")
-	autoAdjustPrice := flag.Bool("autoAdjustPrice", true, "Enable/disable automatic price adjustments based on the overhead for redeeming tickets")
 	// Interval to poll for blocks
 	blockPollingInterval := flag.Int("blockPollingInterval", 5, "Interval in seconds at which different blockchain event services poll for blocks")
 	// Redemption service
@@ -149,34 +157,19 @@ func main() {
 	monitor := flag.Bool("monitor", false, "Set to true to send performance metrics")
 	version := flag.Bool("version", false, "Print out the version")
 	verbosity := flag.String("v", "", "Log verbosity.  {4|5|6}")
-	metadataQueueUri := flag.String("metadataQueueUri", "", "URI for message broker to send operation metadata")
-	metadataAmqpExchange := flag.String("metadataAmqpExchange", "lp_golivepeer_metadata", "Name of AMQP exchange to send operation metadata")
-	metadataPublishTimeout := flag.Duration("metadataPublishTimeout", 1*time.Second, "Max time to wait in background for publishing operation metadata events")
 
 	// Storage:
 	datadir := flag.String("datadir", "", "Directory that data is stored in")
 	objectstore := flag.String("objectStore", "", "url of primary object store")
-	recordstore := flag.String("recordStore", "", "url of object store for recordings")
+	recordstore := flag.String("recordStore", "", "url of object store for recodings")
 
 	// API
 	authWebhookURL := flag.String("authWebhookUrl", "", "RTMP authentication webhook URL")
 	orchWebhookURL := flag.String("orchWebhookUrl", "", "Orchestrator discovery callback URL")
-	detectionWebhookURL := flag.String("detectionWebhookUrl", "", "(Experimental) Detection results callback URL")
 
 	// Transcoder pool
 	publicTPool := flag.Bool("transcoderPool", false, "Set to true to enable a public transcoder pool")
 	poolCommission := flag.Int("poolCommission", 1, "Commision for the public transcoder pool in percentage points")
-
-	// Config file
-	_ = flag.String("config", "", "Config file in the format 'key value', flags and env vars take precedence over the config file")
-	err = ff.Parse(flag.CommandLine, os.Args[1:],
-		ff.WithConfigFileFlag("config"),
-		ff.WithEnvVarPrefix("LP"),
-		ff.WithConfigFileParser(ff.PlainParser),
-	)
-	if err != nil {
-		glog.Fatal("Error parsing config: ", err)
-	
 
 	flag.Parse()
 	vFlag.Value.Set(*verbosity)
@@ -185,17 +178,6 @@ func main() {
 	flag.Visit(func(f *flag.Flag) { isFlagSet[f.Name] = true })
 
 	blockPollingTime := time.Duration(*blockPollingInterval) * time.Second
-
-	if *mistJson {
-		mistconnector.PrintMistConfigJson(
-			"livepeer",
-			"Official implementation of the Livepeer video processing protocol. Can play all roles in the network.",
-			"Livepeer",
-			core.LivepeerVersion,
-			flag.CommandLine,
-		)
-		return
-	}
 
 	if *version {
 		fmt.Println("Livepeer Node Version: " + core.LivepeerVersion)
@@ -212,21 +194,18 @@ func main() {
 
 	type NetworkConfig struct {
 		ethController string
-		minGasPrice   int64
+		minGasPrice   *big.Int
 	}
 
 	ctx := context.Background()
 
 	configOptions := map[string]*NetworkConfig{
 		"rinkeby": {
-			ethController: "0x9a9827455911a858E55f07911904fACC0D66027E",
-		},
-		"arbitrum-one-rinkeby": {
-			ethController: "0x9ceC649179e2C7Ab91688271bcD09fb707b3E574",
+			ethController: "0xA268AEa9D048F8d3A592dD7f1821297972D4C8Ea",
 		},
 		"mainnet": {
 			ethController: "0xf96d54e490317c557a967abfa5d6e33006be69b3",
-			minGasPrice:   int64(params.GWei),
+			minGasPrice:   big.NewInt(int64(params.GWei)),
 		},
 	}
 
@@ -249,15 +228,12 @@ func main() {
 	}
 
 	// Setting config options based on specified network
+	var minGasPrice = big.NewInt(0)
 	if netw, ok := configOptions[*network]; ok {
 		if *ethController == "" {
 			*ethController = netw.ethController
+			minGasPrice = netw.minGasPrice
 		}
-
-		if !isFlagSet["minGasPrice"] {
-			*minGasPrice = netw.minGasPrice
-		}
-
 		glog.Infof("***Livepeer is running on the %v network: %v***", *network, *ethController)
 	} else {
 		glog.Infof("***Livepeer is running on the %v network***", *network)
@@ -309,24 +285,11 @@ func main() {
 			if *testTranscoder {
 				err := core.TestNvidiaTranscoder(devices)
 				if err != nil {
-					glog.Fatalf("Unable to transcode using Nvidia gpu=%q err=%q", strings.Join(devices, ","), err)
-				}
-			}
-			// FIXME: Short-term hack to pre-load the detection models on every device
-			if *sceneClassificationModelPath != "" {
-				detectorProfile := ffmpeg.DSceneAdultSoccer
-				detectorProfile.ModelPath = *sceneClassificationModelPath
-				core.DetectorProfile = &detectorProfile
-				for _, d := range devices {
-					tc, err := core.NewNvidiaTranscoderWithDetector(&detectorProfile, d)
-					if err != nil {
-						glog.Fatalf("Could not initialize detector")
-					}
-					defer tc.Stop()
+					glog.Fatalf("Unable to transcode using Nvidia gpu=%s err=%v", strings.Join(devices, ","), err)
 				}
 			}
 			// Initialize LB transcoder
-			n.Transcoder = core.NewLoadBalancingTranscoder(devices, core.NewNvidiaTranscoder, core.NewNvidiaTranscoderWithDetector)
+			n.Transcoder = core.NewLoadBalancingTranscoder(devices, core.NewNvidiaTranscoder)
 		} else {
 			n.Transcoder = core.NewLocalTranscoder(*datadir)
 		}
@@ -428,40 +391,7 @@ func main() {
 			bigMaxGasPrice = big.NewInt(int64(*maxGasPrice))
 		}
 
-		gpm := eth.NewGasPriceMonitor(backend, blockPollingTime, big.NewInt(*minGasPrice), bigMaxGasPrice)
-		// Start gas price monitor
-		_, err = gpm.Start(ctx)
-		if err != nil {
-			glog.Errorf("Error starting gas price monitor: %v", err)
-			return
-		}
-		defer gpm.Stop()
-
-		am, err := eth.NewAccountManager(ethcommon.HexToAddress(*ethAcctAddr), keystoreDir, chainID)
-		if err != nil {
-			glog.Errorf("Error creating Ethereum account manager: %v", err)
-			return
-		}
-
-		if err := am.Unlock(*ethPassword); err != nil {
-			glog.Errorf("Error unlocking Ethereum account: %v", err)
-			return
-		}
-
-		tm := eth.NewTransactionManager(backend, gpm, am, *txTimeout, *maxTxReplacements)
-		go tm.Start()
-		defer tm.Stop()
-
-		ethCfg := eth.LivepeerEthClientConfig{
-			AccountManager:     am,
-			ControllerAddr:     ethcommon.HexToAddress(*ethController),
-			EthClient:          backend,
-			GasPriceMonitor:    gpm,
-			TransactionManager: tm,
-			Signer:             types.LatestSignerForChainID(chainID),
-		}
-
-		client, err := eth.NewClient(ethCfg)
+		client, err := eth.NewClient(ethcommon.HexToAddress(*ethAcctAddr), keystoreDir, *ethPassword, backend, ethcommon.HexToAddress(*ethController), EthTxTimeout, bigMaxGasPrice)
 		if err != nil {
 			glog.Errorf("Failed to create Livepeer Ethereum client: %v", err)
 			return
@@ -577,7 +507,7 @@ func main() {
 			CleanupInterval: cleanupInterval,
 			TTL:             smTTL,
 			RedeemGas:       redeemGas,
-			SuggestGasPrice: client.Backend().SuggestGasPrice,
+			SuggestGasPrice: backend.SuggestGasPrice,
 			RPCTimeout:      ethRPCTimeout,
 		}
 
@@ -596,8 +526,6 @@ func main() {
 			}
 			n.SetBasePrice(big.NewRat(int64(*pricePerUnit), int64(*pixelsPerUnit)))
 			glog.Infof("Price: %d wei for %d pixels\n ", *pricePerUnit, *pixelsPerUnit)
-
-			n.AutoAdjustPrice = *autoAdjustPrice
 
 			ev, _ := new(big.Int).SetString(*ticketEV, 10)
 			if ev == nil {
@@ -620,6 +548,14 @@ func main() {
 
 			sigVerifier := &pm.DefaultSigVerifier{}
 			validator := pm.NewValidator(sigVerifier, timeWatcher)
+			gpm := eth.NewGasPriceMonitor(backend, blockPollingTime, minGasPrice)
+			// Start gas price monitor
+			_, err := gpm.Start(ctx)
+			if err != nil {
+				glog.Errorf("error starting gas price monitor: %v", err)
+				return
+			}
+			defer gpm.Stop()
 
 			var sm pm.SenderMonitor
 			if *redeemerAddr != "" {
@@ -829,21 +765,12 @@ func main() {
 	}
 
 	if *authWebhookURL != "" {
-		parsedUrl, err := validateURL(*authWebhookURL)
+		_, err := validateURL(*authWebhookURL)
 		if err != nil {
 			glog.Fatal("Error setting auth webhook URL ", err)
 		}
-		glog.Info("Using auth webhook URL ", parsedUrl.Redacted())
-		server.AuthWebhookURL = parsedUrl
-	}
-
-	if *detectionWebhookURL != "" {
-		parsedUrl, err := validateURL(*detectionWebhookURL)
-		if err != nil {
-			glog.Fatal("Error setting detection webhook URL ", err)
-		}
-		glog.Info("Using detection webhook URL ", parsedUrl.Redacted())
-		server.DetectionWebhookURL = parsedUrl
+		glog.Info("Using auth webhook URL ", *authWebhookURL)
+		server.AuthWebhookURL = *authWebhookURL
 	}
 
 	if n.NodeType == core.BroadcasterNode {
@@ -877,7 +804,7 @@ func main() {
 			glog.Info("Using orchestrator webhook URL ", whurl)
 			n.OrchestratorPool = discovery.NewWebhookPool(bcast, whurl)
 		} else if len(orchURLs) > 0 {
-			n.OrchestratorPool = discovery.NewOrchestratorPool(bcast, orchURLs, common.Score_Trusted)
+			n.OrchestratorPool = discovery.NewOrchestratorPool(bcast, orchURLs)
 		}
 
 		if n.OrchestratorPool == nil {
@@ -890,7 +817,7 @@ func main() {
 			glog.Errorf("Error checking for local -httpAddr: %v", err)
 			return
 		}
-		if !isFlagSet["httpIngest"] && !isLocalHTTP && server.AuthWebhookURL == nil {
+		if !isFlagSet["httpIngest"] && !isLocalHTTP && server.AuthWebhookURL == "" {
 			glog.Warning("HTTP ingest is disabled because -httpAddr is publicly accessible. To enable, configure -authWebhookUrl or use the -httpIngest flag")
 			*httpIngest = false
 		}
@@ -922,7 +849,6 @@ func main() {
 
 		// Set max transcode attempts. <=0 is OK; it just means "don't transcode"
 		server.MaxAttempts = *maxAttempts
-		server.SelectRandFreq = *selectRandFreq
 
 	} else if n.NodeType == core.OrchestratorNode {
 		suri, err := getServiceURI(n, *serviceAddr)
@@ -934,12 +860,7 @@ func main() {
 		// take the port to listen to from the service URI
 		*httpAddr = defaultAddr(*httpAddr, "", n.GetServiceURI().Port())
 
-		caps := core.DefaultCapabilities()
-		if *sceneClassificationModelPath != "" {
-			// Only enable experimental capabilities if scene classification model is actually loaded
-			caps = append(caps, core.ExperimentalCapabilities()...)
-		}
-		n.Capabilities = core.NewCapabilities(caps, core.MandatoryCapabilities())
+		n.Capabilities = core.NewCapabilities(defaultCapabilities, mandatoryCapabilities)
 
 		if !*transcoder && n.OrchSecret == "" {
 			glog.Fatal("Running an orchestrator requires an -orchSecret for standalone mode or -transcoder for orchestrator+transcoder mode")
@@ -950,26 +871,6 @@ func main() {
 	if drivers.NodeStorage == nil {
 		// base URI will be empty for broadcasters; that's OK
 		drivers.NodeStorage = drivers.NewMemoryDriver(n.GetServiceURI())
-	}
-
-	if *metadataPublishTimeout > 0 {
-		server.MetadataPublishTimeout = *metadataPublishTimeout
-	}
-	if *metadataQueueUri != "" {
-		uri, err := url.ParseRequestURI(*metadataQueueUri)
-		if err != nil {
-			glog.Fatalf("Error parsing -metadataQueueUri: err=%q", err)
-		}
-		switch uri.Scheme {
-		case "amqp", "amqps":
-			uriStr, exchange, keyNs := *metadataQueueUri, *metadataAmqpExchange, n.NodeType.String()
-			server.MetadataQueue, err = event.NewAMQPExchangeProducer(context.Background(), uriStr, exchange, keyNs)
-			if err != nil {
-				glog.Fatalf("Error establishing AMQP connection: err=%q", err)
-			}
-		default:
-			glog.Fatalf("Unsupported scheme in -metadataUri: %s", uri.Scheme)
-		}
 	}
 
 	//Create Livepeer Node
@@ -1121,19 +1022,19 @@ func getServiceURI(n *core.LivepeerNode, serviceAddr string) (*url.URL, error) {
 	// TODO probably should put this (along w wizard GETs) into common code
 	resp, err := http.Get("https://api.ipify.org?format=text")
 	if err != nil {
-		glog.Errorf("Could not look up public IP err=%q", err)
+		glog.Errorf("Could not look up public IP err=%v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		glog.Errorf("Could not look up public IP err=%q", err)
+		glog.Errorf("Could not look up public IP err=%v", err)
 		return nil, err
 	}
 	addr := "https://" + strings.TrimSpace(string(body)) + ":" + RpcPort
 	inferredUri, err := url.ParseRequestURI(addr)
 	if err != nil {
-		glog.Errorf("Could not look up public IP err=%q", err)
+		glog.Errorf("Could not look up public IP err=%v", err)
 		return nil, err
 	}
 	if n.Eth == nil {
@@ -1144,12 +1045,12 @@ func getServiceURI(n *core.LivepeerNode, serviceAddr string) (*url.URL, error) {
 	// On-chain lookup and matching with inferred public address
 	addr, err = n.Eth.GetServiceURI(n.Eth.Account().Address)
 	if err != nil {
-		glog.Errorf("Could not get service URI; orchestrator may be unreachable err=%q", err)
+		glog.Errorf("Could not get service URI; orchestrator may be unreachable err=%v", err)
 		return nil, err
 	}
 	ethUri, err := url.ParseRequestURI(addr)
 	if err != nil {
-		glog.Errorf("Could not parse service URI; orchestrator may be unreachable err=%q", err)
+		glog.Errorf("Could not parse service URI; orchestrator may be unreachable err=%v", err)
 		ethUri, _ = url.ParseRequestURI("http://127.0.0.1:" + RpcPort)
 	}
 	if ethUri.Hostname() != inferredUri.Hostname() || ethUri.Port() != inferredUri.Port() {

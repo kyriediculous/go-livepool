@@ -1414,7 +1414,9 @@ type RegisterRequest struct {
 	// Shared secret for auth
 	Secret string `protobuf:"bytes,1,opt,name=secret,proto3" json:"secret,omitempty"`
 	// Transcoder capacity
-	Capacity             int64    `protobuf:"varint,2,opt,name=capacity,proto3" json:"capacity,omitempty"`
+	Capacity int64 `protobuf:"varint,2,opt,name=capacity,proto3" json:"capacity,omitempty"`
+	// Transcoder ethereum address
+	EthereumAddress      []byte   `protobuf:"bytes,3,opt,name=ethereum_address,json=ethereumAddress,proto3" json:"ethereum_address,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
@@ -1457,6 +1459,13 @@ func (m *RegisterRequest) GetCapacity() int64 {
 		return m.Capacity
 	}
 	return 0
+}
+
+func (m *RegisterRequest) GetEthereumAddress() []byte {
+	if m != nil {
+		return m.EthereumAddress
+	}
+	return nil
 }
 
 // Sent by the orchestrator to the transcoder
