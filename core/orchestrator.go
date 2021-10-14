@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
+	"math/rand"
 	"net/url"
 	"os"
 	"path"
@@ -40,6 +41,15 @@ var transcodeLoopTimeout = 1 * time.Minute
 // Gives us more control of "timeout" / cancellation behavior during testing
 var transcodeLoopContext = func() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), transcodeLoopTimeout)
+}
+
+var shuffleTranscoders = func(remoteTranscoders []*RemoteTranscoder) []*RemoteTranscoder {
+	rtms := make([]*RemoteTranscoder, len(remoteTranscoders))
+	for i, j := range rand.Perm(len(remoteTranscoders)) {
+		rtms[i] = remoteTranscoders[j]
+	}
+	sort.Sort(byLoadFactor(rtms))
+	return rtms
 }
 
 // Transcoder / orchestrator RPC interface implementation
@@ -92,8 +102,8 @@ func (orch *orchestrator) TranscodeSeg(ctx context.Context, md *SegTranscodingMe
 	return orch.node.sendToTranscodeLoop(ctx, md, seg)
 }
 
-func (orch *orchestrator) ServeTranscoder(stream net.Transcoder_RegisterTranscoderServer, capacity int, capabilities *net.Capabilities) {
-	orch.node.serveTranscoder(stream, capacity, capabilities)
+func (orch *orchestrator) ServeTranscoder(stream net.Transcoder_RegisterTranscoderServer, capacity int, capabilities *net.Capabilities, ethereumAddr ethcommon.Address) {
+	orch.node.serveTranscoder(stream, capacity, capabilities, ethereumAddr)
 }
 
 func (orch *orchestrator) TranscoderResults(tcID int64, res *RemoteTranscoderResult) {
@@ -661,9 +671,9 @@ func (n *LivepeerNode) transcodeSegmentLoop(logCtx context.Context, md *SegTrans
 	return nil
 }
 
-func (n *LivepeerNode) serveTranscoder(stream net.Transcoder_RegisterTranscoderServer, capacity int, capabilities *net.Capabilities) {
+func (n *LivepeerNode) serveTranscoder(stream net.Transcoder_RegisterTranscoderServer, capacity int, capabilities *net.Capabilities, ethereumAddr ethcommon.Address) {
 	from := common.GetConnectionAddr(stream.Context())
-	n.TranscoderManager.Manage(stream, capacity, capabilities)
+	n.TranscoderManager.Manage(stream, capacity, capabilities, ethereumAddr)
 	glog.V(common.DEBUG).Infof("Closing transcoder=%s channel", from)
 }
 
@@ -683,6 +693,7 @@ type RemoteTranscoder struct {
 	addr         string
 	capacity     int
 	load         int
+	ethereumAddr ethcommon.Address
 }
 
 // RemoteTranscoderFatalError wraps error to indicate that error is fatal
@@ -764,7 +775,7 @@ func (rt *RemoteTranscoder) Transcode(logCtx context.Context, md *SegTranscoding
 		return chanData.TranscodeData, chanData.Err
 	}
 }
-func NewRemoteTranscoder(m *RemoteTranscoderManager, stream net.Transcoder_RegisterTranscoderServer, capacity int, caps *Capabilities) *RemoteTranscoder {
+func NewRemoteTranscoder(m *RemoteTranscoderManager, stream net.Transcoder_RegisterTranscoderServer, capacity int, caps *Capabilities, ethereumAddr ethcommon.Address) *RemoteTranscoder {
 	return &RemoteTranscoder{
 		manager:      m,
 		stream:       stream,
@@ -772,6 +783,7 @@ func NewRemoteTranscoder(m *RemoteTranscoderManager, stream net.Transcoder_Regis
 		capacity:     capacity,
 		addr:         common.GetConnectionAddr(stream.Context()),
 		capabilities: caps,
+		ethereumAddr: ethereumAddr,
 	}
 }
 
@@ -812,6 +824,8 @@ type RemoteTranscoderManager struct {
 
 	// Map for keeping track of sessions and their respective transcoders
 	streamSessions map[string]*RemoteTranscoder
+	// Transcoder Pool Manager
+	Pool *PublicTranscoderPool
 }
 
 // RegisteredTranscodersCount returns number of registered transcoders
@@ -821,21 +835,21 @@ func (rtm *RemoteTranscoderManager) RegisteredTranscodersCount() int {
 	return len(rtm.liveTranscoders)
 }
 
-// RegisteredTranscodersInfo returns list of restered transcoder's information
-func (rtm *RemoteTranscoderManager) RegisteredTranscodersInfo() []common.RemoteTranscoderInfo {
+// RegisteredTranscodersInfo returns list of registered transcoder's information
+func (rtm *RemoteTranscoderManager) RegisteredTranscodersInfo() []*net.RemoteTranscoderInfo {
 	rtm.RTmutex.Lock()
-	res := make([]common.RemoteTranscoderInfo, 0, len(rtm.liveTranscoders))
+	res := make([]*net.RemoteTranscoderInfo, 0, len(rtm.liveTranscoders))
 	for _, transcoder := range rtm.liveTranscoders {
-		res = append(res, common.RemoteTranscoderInfo{Address: transcoder.addr, Capacity: transcoder.capacity})
+		res = append(res, &net.RemoteTranscoderInfo{Address: transcoder.addr, Capacity: transcoder.capacity, EthereumAddress: transcoder.ethereumAddr})
 	}
 	rtm.RTmutex.Unlock()
 	return res
 }
 
 // Manage adds transcoder to list of live transcoders. Doesn't return until transcoder disconnects
-func (rtm *RemoteTranscoderManager) Manage(stream net.Transcoder_RegisterTranscoderServer, capacity int, capabilities *net.Capabilities) {
+func (rtm *RemoteTranscoderManager) Manage(stream net.Transcoder_RegisterTranscoderServer, capacity int, capabilities *net.Capabilities, ethereumAddr ethcommon.Address) {
 	from := common.GetConnectionAddr(stream.Context())
-	transcoder := NewRemoteTranscoder(rtm, stream, capacity, CapabilitiesFromNetCapabilities(capabilities))
+	transcoder := NewRemoteTranscoder(rtm, stream, capacity, CapabilitiesFromNetCapabilities(capabilities), ethereumAddr)
 	go func() {
 		ctx := stream.Context()
 		<-ctx.Done()
@@ -847,7 +861,9 @@ func (rtm *RemoteTranscoderManager) Manage(stream net.Transcoder_RegisterTransco
 	rtm.RTmutex.Lock()
 	rtm.liveTranscoders[transcoder.stream] = transcoder
 	rtm.remoteTranscoders = append(rtm.remoteTranscoders, transcoder)
+
 	sort.Sort(byLoadFactor(rtm.remoteTranscoders))
+
 	var totalLoad, totalCapacity, liveTranscodersNum int
 	if monitor.Enabled {
 		totalLoad, totalCapacity, liveTranscodersNum = rtm.totalLoadAndCapacity()
@@ -914,6 +930,9 @@ func (rtm *RemoteTranscoderManager) selectTranscoder(sessionId string, caps *Cap
 		}
 		return -1
 	}
+
+	// shuffle and sort
+	rtm.remoteTranscoders = shuffleTranscoders(rtm.remoteTranscoders)
 
 	for checkTranscoders(rtm) {
 		currentTranscoder, sessionExists := rtm.streamSessions[sessionId]
@@ -994,5 +1013,14 @@ func (rtm *RemoteTranscoderManager) Transcode(ctx context.Context, md *SegTransc
 		}
 		return rtm.Transcode(ctx, md)
 	}
+
+	if rtm.Pool != nil && err == nil {
+		go func() {
+			if err := rtm.Pool.Reward(currentTranscoder, res); err != nil {
+				glog.Error(err)
+			}
+		}()
+	}
+
 	return res, err
 }

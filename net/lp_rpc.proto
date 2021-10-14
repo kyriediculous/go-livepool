@@ -339,6 +339,9 @@ message RegisterRequest {
 
     // Transcoder capabilities
     Capabilities capabilities = 3;
+
+    // Transcoder ethereum address
+    bytes ethereum_address = 4;
 }
 
 // Sent by the orchestrator to the transcoder
