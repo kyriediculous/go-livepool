@@ -10,20 +10,9 @@ require (
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cespare/cp v1.1.1 // indirect
 	github.com/deckarep/golang-set v1.7.1 // indirect
-<<<<<<< HEAD
 	github.com/ethereum/go-ethereum v1.10.8
 	github.com/fatih/color v1.12.0 // indirect
 	github.com/golang/glog v0.0.0-20210429001901-424d2337a529
-=======
-	github.com/docker/docker v1.13.1 // indirect
-	github.com/edsrzf/mmap-go v1.0.0 // indirect
-	github.com/elastic/gosigar v0.10.5 // indirect
-	github.com/ethereum/go-ethereum v1.9.3
-	github.com/fatih/color v1.7.0 // indirect
-	github.com/fjl/memsize v0.0.0-20190710130421-bcb5799ab5e5 // indirect
-	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff // indirect
-	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
->>>>>>> dff2ae20... docker, build: images and build pipelines
 	github.com/golang/mock v1.4.3
 	github.com/golang/protobuf v1.5.2
 	github.com/jaypipes/ghw v0.7.0
