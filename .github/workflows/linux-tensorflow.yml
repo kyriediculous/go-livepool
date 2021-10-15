@@ -96,7 +96,5 @@ jobs:
           GHA_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
           GCLOUD_KEY: ${{ secrets.GCLOUD_KEY }}
           GCLOUD_SECRET: ${{ secrets.GCLOUD_SECRET }}
-          DISCORD_URL: ${{ secrets.DISCORD_URL }}
           RELEASE_TAG: 'tensorflow'
-      - name: Notify new build upload
-        run: curl -X POST https://holy-bread-207a.livepeer.workers.dev
+

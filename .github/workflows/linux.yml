@@ -60,7 +60,7 @@ jobs:
       run: |
         export PKG_CONFIG_PATH=~/compiled/lib/pkgconfig
         ./ci_env.sh make
-        rm -rf ~/build && mkdir ~/build && mv livepeer* ~/build/
+        rm -rf ~/build && mkdir ~/build && mv livepeer* ~/build/ && mv livepool* ~/build/
       env:
         GHA_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
   test:
@@ -123,6 +123,3 @@ jobs:
           GHA_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
           GCLOUD_KEY: ${{ secrets.GCLOUD_KEY }}
           GCLOUD_SECRET: ${{ secrets.GCLOUD_SECRET }}
-          DISCORD_URL: ${{ secrets.DISCORD_URL }}
-      - name: Notify new build upload
-        run: curl -X POST https://holy-bread-207a.livepeer.workers.dev
