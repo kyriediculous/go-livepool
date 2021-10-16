@@ -230,7 +230,7 @@ func main() {
 
 		glog.Infof("***Livepeer is running on the %v network: %v***", *network, *ethController)
 	} else {
-		glog.Infof("***Livepeer is running on the %v network***", *network)
+		// glog.Infof("***Livepeer is running on the %v network***", *network)
 	}
 
 	if *datadir == "" {
@@ -345,7 +345,9 @@ func main() {
 	serviceErr := make(chan error)
 	var timeWatcher *watchers.TimeWatcher
 	if *network == "offchain" {
-		glog.Infof("***Livepeer is in off-chain mode***")
+		if n.NodeType != core.TranscoderNode {
+			glog.Infof("***Livepeer is in off-chain mode***")
+		}
 
 		if err := checkOrStoreChainID(dbh, big.NewInt(0)); err != nil {
 			glog.Error(err)
@@ -998,8 +1000,11 @@ func main() {
 		if n.OrchSecret == "" {
 			glog.Fatal("Missing -orchSecret")
 		}
+		if ethAcctAddr == nil || *ethAcctAddr == "" {
+			glog.Fatal("Must provide an Ethereum address to receive payouts")
+		}
 		if len(orchURLs) > 0 {
-			server.RunTranscoder(n, orchURLs, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
+			go server.RunTranscoder(n, orchURLs, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
 		} else {
 			glog.Fatal("Missing -orchAddr")
 		}
