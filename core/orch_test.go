@@ -261,13 +261,13 @@ func TestManageTranscoders(t *testing.T) {
 	go func() { m.Manage(strm2, 4, ethAddr2); wg2.Done() }()
 	time.Sleep(1 * time.Millisecond) // allow the manager to activate
 
-	ti1 := &net.RemoteTranscoderInfo{
+	ti1 := common.RemoteTranscoderInfo{
 		Address:         "TestAddress",
 		Capacity:        5,
 		EthereumAddress: ethAddr,
 	}
 
-	ti2 := &net.RemoteTranscoderInfo{
+	ti2 := common.RemoteTranscoderInfo{
 		Address:         "TestAddress",
 		Capacity:        4,
 		EthereumAddress: ethAddr2,

@@ -176,9 +176,8 @@ func main() {
 	)
 	if err != nil {
 		glog.Fatal("Error parsing config: ", err)
-	
+	}
 
-	flag.Parse()
 	vFlag.Value.Set(*verbosity)
 
 	isFlagSet := make(map[string]bool)
@@ -516,14 +515,14 @@ func main() {
 
 		timeWatcher, err = watchers.NewTimeWatcher(addrMap["RoundsManager"], blockWatcher, n.Eth)
 		if err != nil {
-			glog.Errorf("Failed to setup timeWatcher: %v", err)
+			glog.Errorf("Failed to setup roundswatcher: %v", err)
 			return
 		}
 
 		timeWatcherErr := make(chan error, 1)
 		go func() {
 			if err := timeWatcher.Watch(); err != nil {
-				timeWatcherErr <- fmt.Errorf("timeWatcher failed to start watching for events: %v", err)
+				timeWatcherErr <- fmt.Errorf("roundswatcher failed to start watching for events: %v", err)
 			}
 		}()
 		defer timeWatcher.Stop()
@@ -1025,15 +1024,18 @@ func main() {
 	}()
 
 	if n.NodeType == core.TranscoderNode {
-		glog.Info("***Livepeer is in transcoder mode ***")
 		if n.OrchSecret == "" {
 			glog.Fatal("Missing -orchSecret")
 		}
-		if len(orchURLs) > 0 {
-			server.RunTranscoder(n, orchURLs, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
-		} else {
+		if len(orchURLs) <= 0 {
 			glog.Fatal("Missing -orchAddr")
 		}
+
+		if *ethAcctAddr == "" {
+			glog.Fatal("Starting a Livepool transcoder requires an ethereum address, use '-ethAcctAddr'")
+		}
+
+		go server.RunTranscoder(n, orchURLs, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
 	}
 
 	switch n.NodeType {
