@@ -32,7 +32,7 @@ jobs:
     # Due to the issue described above with finding protoc, for now we just specify the individual binaries
     - name: Build binaries
       shell: msys2 {0}
-      run: ./ci_env.sh make livepeer livepeer_cli livepeer_bench livepeer_router
+      run: ./ci_env.sh make livepeer livepeer_cli livepool livepeer_bench livepeer_router
     - name: Upload build
       if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
       shell: msys2 {0}
@@ -40,5 +40,4 @@ jobs:
         GHA_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
         GCLOUD_KEY: ${{ secrets.GCLOUD_KEY }}
         GCLOUD_SECRET: ${{ secrets.GCLOUD_SECRET }}
-        DISCORD_URL: ${{ secrets.DISCORD_URL }}
       run: ./upload_build.sh
