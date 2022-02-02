@@ -135,7 +135,9 @@ func runTranscoder(n *core.LivepeerNode, orchAddr string, capacity int, caps []c
 		return err
 	}
 
-	glog.Info("Transcoder started")
+	glog.Info("***** Transcoder succesfully started! *****")
+	glog.Infof("Connected to: %v", orchAddr)
+	glog.Info("Waiting for segments...")
 
 	// Catch interrupt signal to shut down transcoder
 	exitc := make(chan os.Signal)
@@ -324,7 +326,8 @@ func sendTranscodeResult(ctx context.Context, n *core.LivepeerNode, orchAddr str
 
 func (h *lphttp) RegisterTranscoder(req *net.RegisterRequest, stream net.Transcoder_RegisterTranscoderServer) error {
 	from := common.GetConnectionAddr(stream.Context())
-	glog.Infof("Got a RegisterTranscoder request from transcoder=%s capacity=%d", from, req.Capacity)
+	ethAddress := ethcommon.BytesToAddress(req.EthereumAddress)
+	glog.Infof("Got a RegisterTranscoder request from transcoder=%s capacity=%d address=%v", from, req.Capacity, ethAddress)
 
 	if req.Secret != h.orchestrator.TranscoderSecret() {
 		glog.Errorf("err=%q", errSecret.Error())

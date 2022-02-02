@@ -168,7 +168,11 @@ func (dbo *DBOrchestratorPoolCache) Size() int {
 	count, _ := dbo.store.OrchCount(
 		&common.DBOrchFilter{
 			MaxPrice:       server.BroadcastCfg.MaxPrice(),
+<<<<<<< HEAD
 			CurrentRound:   dbo.nextRound(),
+=======
+			CurrentRound:   dbo.rm.LastInitializedRound(),
+>>>>>>> 5222fd50... v0.5.22 releaseé
 			UpdatedLastDay: true,
 		},
 	)

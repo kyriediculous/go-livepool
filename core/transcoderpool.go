@@ -99,7 +99,7 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 
 	// check transaction cost overhead
 	gasLimit := big.NewInt(21000)
-	b, err := pool.node.Eth.Backend()
+	b := pool.node.Eth.Backend()
 	if err != nil {
 		return err
 	}
