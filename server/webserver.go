@@ -17,16 +17,14 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/cenkalti/backoff"
-	"github.com/ethereum/go-ethereum/common"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/golang/glog"
-	lpcommon "github.com/livepeer/go-livepeer/common"
+	"github.com/livepeer/go-livepeer/common"
 	"github.com/livepeer/go-livepeer/core"
 	"github.com/livepeer/go-livepeer/eth"
 	lpTypes "github.com/livepeer/go-livepeer/eth/types"
 	"github.com/livepeer/go-livepeer/monitor"
-	"github.com/livepeer/go-livepeer/net"
 	ffmpeg "github.com/livepeer/lpms/ffmpeg"
 	"github.com/pkg/errors"
 )
@@ -289,7 +287,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 
 		unbondingLockIDStr := r.FormValue("unbondingLockId")
 		if unbondingLockIDStr != "" {
-			unbondingLockID, err := lpcommon.ParseBigInt(unbondingLockIDStr)
+			unbondingLockID, err := common.ParseBigInt(unbondingLockIDStr)
 			if err != nil {
 				respondWith400(w, err.Error())
 				return
@@ -312,7 +310,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 
 		amountStr := r.FormValue("amount")
 		if amountStr != "" {
-			amount, err := lpcommon.ParseBigInt(amountStr)
+			amount, err := common.ParseBigInt(amountStr)
 			if err != nil {
 				respondWith400(w, err.Error())
 				return
@@ -470,7 +468,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 				glog.Errorf("Need to provide amount")
 				return
 			}
-			amount, err := lpcommon.ParseBigInt(amountStr)
+			amount, err := common.ParseBigInt(amountStr)
 			if err != nil {
 				glog.Errorf("Cannot convert amount: %v", err)
 				return
@@ -482,7 +480,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 				return
 			}
 
-			tx, err := s.LivepeerNode.Eth.Bond(amount, common.HexToAddress(toAddr))
+			tx, err := s.LivepeerNode.Eth.Bond(amount, ethcommon.HexToAddress(toAddr))
 			if err != nil {
 				glog.Error(err)
 				return
@@ -508,7 +506,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 				glog.Errorf("Need to provide unbondingLockId")
 				return
 			}
-			unbondingLockID, err := lpcommon.ParseBigInt(unbondingLockIDStr)
+			unbondingLockID, err := common.ParseBigInt(unbondingLockIDStr)
 			if err != nil {
 				glog.Errorf("Cannot convert unbondingLockId: %v", err)
 				return
@@ -519,7 +517,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 			toAddr := r.FormValue("toAddr")
 			if toAddr != "" {
 				// toAddr provided - invoke rebondFromUnbonded()
-				tx, err = s.LivepeerNode.Eth.RebondFromUnbonded(common.HexToAddress(toAddr), unbondingLockID)
+				tx, err = s.LivepeerNode.Eth.RebondFromUnbonded(ethcommon.HexToAddress(toAddr), unbondingLockID)
 			} else {
 				// toAddr not provided - invoke rebond()
 				tx, err = s.LivepeerNode.Eth.Rebond(unbondingLockID)
@@ -545,7 +543,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 				glog.Errorf("Need to provide amount")
 				return
 			}
-			amount, err := lpcommon.ParseBigInt(amountStr)
+			amount, err := common.ParseBigInt(amountStr)
 			if err != nil {
 				glog.Errorf("Cannot convert amount: %v", err)
 				return
@@ -577,7 +575,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 				glog.Errorf("Need to provide unbondingLockID")
 				return
 			}
-			unbondingLockID, err := lpcommon.ParseBigInt(unbondingLockIDStr)
+			unbondingLockID, err := common.ParseBigInt(unbondingLockIDStr)
 			if err != nil {
 				glog.Errorf("Cannot convert unbondingLockId: %v", err)
 				return
@@ -743,7 +741,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 	mux.HandleFunc("/orchestratorEarningPoolsForRound", func(w http.ResponseWriter, r *http.Request) {
 		if s.LivepeerNode.Eth != nil {
 			roundStr := r.URL.Query().Get("round")
-			round, err := lpcommon.ParseBigInt(roundStr)
+			round, err := common.ParseBigInt(roundStr)
 			if err != nil {
 				glog.Error(err)
 				return
@@ -874,7 +872,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 		w.Header().Set("Content-Type", "application/json")
 
 		type remoteT struct {
-			Nodes   []*net.RemoteTranscoderInfo
+			Nodes   []common.RemoteTranscoderInfo
 			Pending *big.Int
 			Payout  *big.Int
 		}
@@ -892,7 +890,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 				tr, ok := transcoders[t.EthereumAddress]
 				if !ok {
 					transcoders[t.EthereumAddress] = &remoteT{
-						Nodes:   []*net.RemoteTranscoderInfo{t},
+						Nodes:   []common.RemoteTranscoderInfo{t},
 						Pending: rewards.Pending,
 						Payout:  rewards.Payout,
 					}
@@ -1056,8 +1054,8 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 			}
 
 			for _, o := range orchestrators {
-				dbO, err := s.LivepeerNode.Database.SelectOrchs(&lpcommon.DBOrchFilter{
-					Addresses: []common.Address{o.Address},
+				dbO, err := s.LivepeerNode.Database.SelectOrchs(&common.DBOrchFilter{
+					Addresses: []ethcommon.Address{o.Address},
 				})
 				if err != nil {
 					glog.Errorf("unable to get orchestrators from DB err=%q", err)
@@ -1067,7 +1065,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 					o.PricePerPixel = big.NewRat(0, 1)
 					continue
 				}
-				o.PricePerPixel = lpcommon.FixedToPrice(dbO[0].PricePerPixel)
+				o.PricePerPixel = common.FixedToPrice(dbO[0].PricePerPixel)
 			}
 
 			data, err := json.Marshal(orchestrators)
@@ -1121,13 +1119,13 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 				glog.Errorf("Need to provide amount")
 				return
 			}
-			amount, err := lpcommon.ParseBigInt(amountStr)
+			amount, err := common.ParseBigInt(amountStr)
 			if err != nil {
 				glog.Error(err)
 				return
 			}
 
-			tx, err := s.LivepeerNode.Eth.Transfer(common.HexToAddress(to), amount)
+			tx, err := s.LivepeerNode.Eth.Transfer(ethcommon.HexToAddress(to), amount)
 			if err != nil {
 				glog.Error(err)
 				return
@@ -1235,7 +1233,7 @@ func (s *LivepeerServer) cliWebServerHandlers(bindAddr string) *http.ServeMux {
 			return
 		}
 
-		gprice, err := lpcommon.ParseBigInt(amount)
+		gprice, err := common.ParseBigInt(amount)
 		if err != nil {
 			glog.Errorf("Parsing failed for price: %v", err)
 			return

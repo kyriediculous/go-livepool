@@ -29,6 +29,8 @@ import (
 	"github.com/livepeer/go-livepeer/pm"
 	"github.com/livepeer/go-livepeer/server"
 	"github.com/livepeer/livepeer-data/pkg/event"
+	"github.com/livepeer/livepeer-data/pkg/mistconnector"
+	"github.com/peterbourgon/ff/v3"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -82,6 +84,8 @@ func main() {
 	//We preserve this flag before resetting all the flags.  Not a scalable approach, but it'll do for now.  More discussions here - https://github.com/livepeer/go-livepeer/pull/617
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
+	mistJson := flag.Bool("j", false, "Print application info as json")
+
 	// Network & Addresses:
 	network := flag.String("network", "offchain", "Network to connect to")
 	rtmpAddr := flag.String("rtmpAddr", "127.0.0.1:"+RtmpPort, "Address to bind for RTMP commands")
@@ -102,7 +106,8 @@ func main() {
 	orchSecret := flag.String("orchSecret", "livepoolio", "Shared secret with the orchestrator as a standalone transcoder")
 	transcodingOptions := flag.String("transcodingOptions", "P240p30fps16x9,P360p30fps16x9", "Transcoding options for broadcast job, or path to json config")
 	maxAttempts := flag.Int("maxAttempts", 3, "Maximum transcode attempts")
-	maxSessions := flag.Int("maxSessions", 3, "Maximum number of concurrent transcoding sessions for Orchestrator, maximum number or RTMP streams for Broadcaster, or maximum capacity for transcoder")
+	selectRandFreq := flag.Float64("selectRandFreq", 0.3, "Frequency to randomly select unknown orchestrators (on-chain mode only)")
+	maxSessions := flag.Int("maxSessions", 5, "Maximum number of concurrent transcoding sessions for Orchestrator, maximum number or RTMP streams for Broadcaster, or maximum capacity for transcoder")
 	currentManifest := flag.Bool("currentManifest", false, "Expose the currently active ManifestID as \"/stream/current.m3u8\"")
 	nvidia := flag.String("nvidia", "", "Comma-separated list of Nvidia GPU device IDs (or \"all\" for all available devices)")
 	testTranscoder := flag.Bool("testTranscoder", true, "Test Nvidia GPU transcoding at startup")
@@ -151,7 +156,7 @@ func main() {
 	// Storage:
 	datadir := flag.String("datadir", "", "Directory that data is stored in")
 	objectstore := flag.String("objectStore", "", "url of primary object store")
-	recordstore := flag.String("recordStore", "", "url of object store for recodings")
+	recordstore := flag.String("recordStore", "", "url of object store for recordings")
 
 	// API
 	authWebhookURL := flag.String("authWebhookUrl", "", "RTMP authentication webhook URL")
@@ -162,13 +167,34 @@ func main() {
 	publicTPool := flag.Bool("transcoderPool", false, "Set to true to enable a public transcoder pool")
 	poolCommission := flag.Int("poolCommission", 1, "Commision for the public transcoder pool in percentage points")
 
-	flag.Parse()
+	// Config file
+	_ = flag.String("config", "", "Config file in the format 'key value', flags and env vars take precedence over the config file")
+	err = ff.Parse(flag.CommandLine, os.Args[1:],
+		ff.WithConfigFileFlag("config"),
+		ff.WithEnvVarPrefix("LP"),
+		ff.WithConfigFileParser(ff.PlainParser),
+	)
+	if err != nil {
+		glog.Fatal("Error parsing config: ", err)
+	}
+
 	vFlag.Value.Set(*verbosity)
 
 	isFlagSet := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) { isFlagSet[f.Name] = true })
 
 	blockPollingTime := time.Duration(*blockPollingInterval) * time.Second
+
+	if *mistJson {
+		mistconnector.PrintMistConfigJson(
+			"livepeer",
+			"Official implementation of the Livepeer video processing protocol. Can play all roles in the network.",
+			"Livepeer",
+			core.LivepeerVersion,
+			flag.CommandLine,
+		)
+		return
+	}
 
 	if *version {
 		fmt.Println("Livepeer Node Version: " + core.LivepeerVersion)
@@ -192,7 +218,10 @@ func main() {
 
 	configOptions := map[string]*NetworkConfig{
 		"rinkeby": {
-			ethController: "0xA268AEa9D048F8d3A592dD7f1821297972D4C8Ea",
+			ethController: "0x9a9827455911a858E55f07911904fACC0D66027E",
+		},
+		"arbitrum-one-rinkeby": {
+			ethController: "0x9ceC649179e2C7Ab91688271bcD09fb707b3E574",
 		},
 		"mainnet": {
 			ethController: "0xf96d54e490317c557a967abfa5d6e33006be69b3",
@@ -230,7 +259,7 @@ func main() {
 
 		glog.Infof("***Livepeer is running on the %v network: %v***", *network, *ethController)
 	} else {
-		// glog.Infof("***Livepeer is running on the %v network***", *network)
+		glog.Infof("***Livepeer is running on the %v network***", *network)
 	}
 
 	if *datadir == "" {
@@ -279,7 +308,7 @@ func main() {
 			if *testTranscoder {
 				err := core.TestNvidiaTranscoder(devices)
 				if err != nil {
-					glog.Fatalf("Unable to transcode using Nvidia gpu=%s err=%v", strings.Join(devices, ","), err)
+					glog.Fatalf("Unable to transcode using Nvidia gpu=%q err=%q", strings.Join(devices, ","), err)
 				}
 			}
 			// FIXME: Short-term hack to pre-load the detection models on every device
@@ -345,9 +374,7 @@ func main() {
 	serviceErr := make(chan error)
 	var timeWatcher *watchers.TimeWatcher
 	if *network == "offchain" {
-		if n.NodeType != core.TranscoderNode {
-			glog.Infof("***Livepeer is in off-chain mode***")
-		}
+		glog.Infof("***Livepeer is in off-chain mode***")
 
 		if err := checkOrStoreChainID(dbh, big.NewInt(0)); err != nil {
 			glog.Error(err)
@@ -488,14 +515,14 @@ func main() {
 
 		timeWatcher, err = watchers.NewTimeWatcher(addrMap["RoundsManager"], blockWatcher, n.Eth)
 		if err != nil {
-			glog.Errorf("Failed to setup timeWatcher: %v", err)
+			glog.Errorf("Failed to setup roundswatcher: %v", err)
 			return
 		}
 
 		timeWatcherErr := make(chan error, 1)
 		go func() {
 			if err := timeWatcher.Watch(); err != nil {
-				timeWatcherErr <- fmt.Errorf("timeWatcher failed to start watching for events: %v", err)
+				timeWatcherErr <- fmt.Errorf("roundswatcher failed to start watching for events: %v", err)
 			}
 		}()
 		defer timeWatcher.Stop()
@@ -849,7 +876,7 @@ func main() {
 			glog.Info("Using orchestrator webhook URL ", whurl)
 			n.OrchestratorPool = discovery.NewWebhookPool(bcast, whurl)
 		} else if len(orchURLs) > 0 {
-			n.OrchestratorPool = discovery.NewOrchestratorPool(bcast, orchURLs)
+			n.OrchestratorPool = discovery.NewOrchestratorPool(bcast, orchURLs, common.Score_Trusted)
 		}
 
 		if n.OrchestratorPool == nil {
@@ -894,6 +921,7 @@ func main() {
 
 		// Set max transcode attempts. <=0 is OK; it just means "don't transcode"
 		server.MaxAttempts = *maxAttempts
+		server.SelectRandFreq = *selectRandFreq
 
 	} else if n.NodeType == core.OrchestratorNode {
 		suri, err := getServiceURI(n, *serviceAddr)
@@ -996,18 +1024,18 @@ func main() {
 	}()
 
 	if n.NodeType == core.TranscoderNode {
-		glog.Info("***Livepeer is in transcoder mode ***")
 		if n.OrchSecret == "" {
 			glog.Fatal("Missing -orchSecret")
 		}
-		if ethAcctAddr == nil || *ethAcctAddr == "" {
-			glog.Fatal("Must provide an Ethereum address to receive payouts")
-		}
-		if len(orchURLs) > 0 {
-			go server.RunTranscoder(n, orchURLs, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
-		} else {
+		if len(orchURLs) <= 0 {
 			glog.Fatal("Missing -orchAddr")
 		}
+
+		if *ethAcctAddr == "" {
+			glog.Fatal("Starting a Livepool transcoder requires an ethereum address, use '-ethAcctAddr'")
+		}
+
+		go server.RunTranscoder(n, orchURLs, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
 	}
 
 	switch n.NodeType {
@@ -1095,19 +1123,19 @@ func getServiceURI(n *core.LivepeerNode, serviceAddr string) (*url.URL, error) {
 	// TODO probably should put this (along w wizard GETs) into common code
 	resp, err := http.Get("https://api.ipify.org?format=text")
 	if err != nil {
-		glog.Errorf("Could not look up public IP err=%v", err)
+		glog.Errorf("Could not look up public IP err=%q", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		glog.Errorf("Could not look up public IP err=%v", err)
+		glog.Errorf("Could not look up public IP err=%q", err)
 		return nil, err
 	}
 	addr := "https://" + strings.TrimSpace(string(body)) + ":" + RpcPort
 	inferredUri, err := url.ParseRequestURI(addr)
 	if err != nil {
-		glog.Errorf("Could not look up public IP err=%v", err)
+		glog.Errorf("Could not look up public IP err=%q", err)
 		return nil, err
 	}
 	if n.Eth == nil {
@@ -1118,12 +1146,12 @@ func getServiceURI(n *core.LivepeerNode, serviceAddr string) (*url.URL, error) {
 	// On-chain lookup and matching with inferred public address
 	addr, err = n.Eth.GetServiceURI(n.Eth.Account().Address)
 	if err != nil {
-		glog.Errorf("Could not get service URI; orchestrator may be unreachable err=%v", err)
+		glog.Errorf("Could not get service URI; orchestrator may be unreachable err=%q", err)
 		return nil, err
 	}
 	ethUri, err := url.ParseRequestURI(addr)
 	if err != nil {
-		glog.Errorf("Could not parse service URI; orchestrator may be unreachable err=%v", err)
+		glog.Errorf("Could not parse service URI; orchestrator may be unreachable err=%q", err)
 		ethUri, _ = url.ParseRequestURI("http://127.0.0.1:" + RpcPort)
 	}
 	if ethUri.Hostname() != inferredUri.Hostname() || ethUri.Port() != inferredUri.Port() {
@@ -1193,5 +1221,3 @@ func checkOrStoreChainID(dbh *common.DB, chainID *big.Int) error {
 
 	return nil
 }
-
-// orchAddr := flag.String("orchAddr", "161.35.157.107:8935,143.110.211.203:8935,165.232.166.255:8935", "Orchestrator to connect to as a standalone transcoder")

@@ -52,7 +52,7 @@ var errNoEthAddress = errors.New("no ethereum address")
 
 // RunTranscoder is main routing of standalone transcoder
 // Exiting it will terminate executable
-func RunTranscoder(n *core.LivepeerNode, orchAddr string, capacity int, caps []core.Capability, ethereumAddr ethcommon.Address) {
+func RunTranscoder(n *core.LivepeerNode, orchURLs []*url.URL, capacity int, caps []core.Capability, ethereumAddr ethcommon.Address) {
 	expb := backoff.NewExponentialBackOff()
 	expb.MaxInterval = time.Minute
 	expb.MaxElapsedTime = 0
