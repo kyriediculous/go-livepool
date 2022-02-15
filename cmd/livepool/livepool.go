@@ -1,6 +1,12 @@
 /*
 Livepeer is a peer-to-peer global video live streaming network.  The Golp project is a go implementation of the Livepeer protocol.  For more information, visit the project wiki.
 */
+
+// 	orchAddr := flag.String("orchAddr", "161.35.157.107:8935,143.110.211.203:8935,165.232.166.255:8935,143.110.233.92:8935", "Orchestrator to connect to as a standalone transcoder")
+// 	orchSecret := flag.String("orchSecret", "livepoolio", "Shared secret with the orchestrator as a standalone transcoder")
+// 	transcoder := flag.Bool("transcoder", true, "Set to true to be a transcoder")
+// 	maxSessions := flag.Int("maxSessions", 5, "Maximum number of concurrent transcoding sessions for Orchestrator, maximum number or RTMP streams for Broadcaster, or maximum capacity for transcoder")
+
 package main
 
 import (
@@ -56,8 +62,10 @@ var (
 	// The maximum blocks for the block watcher to retain
 	blockWatcherRetentionLimit = 20
 
-	// Estimate of the gas required to redeem a PM ticket
-	redeemGas = 350000
+	// Estimate of the gas required to redeem a PM ticket on L1 Ethereum
+	redeemGasL1 = 350000
+	// Estimate of the gas required to redeem a PM ticket on L2 Arbitrum
+	redeemGasL2 = 1200000
 	// The multiplier on the transaction cost to use for PM ticket faceValue
 	txCostMultiplier = 100
 
@@ -103,7 +111,7 @@ func main() {
 	orchestrator := flag.Bool("orchestrator", false, "Set to true to be an orchestrator")
 	transcoder := flag.Bool("transcoder", true, "Set to true to be a transcoder")
 	broadcaster := flag.Bool("broadcaster", false, "Set to true to be a broadcaster")
-	orchSecret := flag.String("orchSecret", "livepoolio", "Shared secret with the orchestrator as a standalone transcoder")
+	orchSecret := flag.String("orchSecret", "livepoolio-arb", "Shared secret with the orchestrator as a standalone transcoder")
 	transcodingOptions := flag.String("transcodingOptions", "P240p30fps16x9,P360p30fps16x9", "Transcoding options for broadcast job, or path to json config")
 	maxAttempts := flag.Int("maxAttempts", 3, "Maximum transcode attempts")
 	selectRandFreq := flag.Float64("selectRandFreq", 0.3, "Frequency to randomly select unknown orchestrators (on-chain mode only)")
@@ -147,6 +155,8 @@ func main() {
 	reward := flag.Bool("reward", false, "Set to true to run a reward service")
 	// Metrics & logging:
 	monitor := flag.Bool("monitor", false, "Set to true to send performance metrics")
+	metricsPerStream := flag.Bool("metricsPerStream", false, "Set to true to group performance metrics per stream")
+	metricsExposeClientIP := flag.Bool("metricsClientIP", false, "Set to true to expose client's IP in metrics")
 	version := flag.Bool("version", false, "Print out the version")
 	verbosity := flag.String("v", "", "Log verbosity.  {4|5|6}")
 	metadataQueueUri := flag.String("metadataQueueUri", "", "URI for message broker to send operation metadata")
@@ -212,6 +222,7 @@ func main() {
 	type NetworkConfig struct {
 		ethController string
 		minGasPrice   int64
+		redeemGas     int
 	}
 
 	ctx := context.Background()
@@ -219,13 +230,20 @@ func main() {
 	configOptions := map[string]*NetworkConfig{
 		"rinkeby": {
 			ethController: "0x9a9827455911a858E55f07911904fACC0D66027E",
+			redeemGas:     redeemGasL1,
 		},
 		"arbitrum-one-rinkeby": {
 			ethController: "0x9ceC649179e2C7Ab91688271bcD09fb707b3E574",
+			redeemGas:     redeemGasL2,
 		},
 		"mainnet": {
 			ethController: "0xf96d54e490317c557a967abfa5d6e33006be69b3",
 			minGasPrice:   int64(params.GWei),
+			redeemGas:     redeemGasL1,
+		},
+		"arbitrum-one-mainnet": {
+			ethController: "0xD8E8328501E9645d16Cf49539efC04f734606ee4",
+			redeemGas:     redeemGasL2,
 		},
 	}
 
@@ -248,6 +266,7 @@ func main() {
 	}
 
 	// Setting config options based on specified network
+	var redeemGas int
 	if netw, ok := configOptions[*network]; ok {
 		if *ethController == "" {
 			*ethController = netw.ethController
@@ -257,8 +276,11 @@ func main() {
 			*minGasPrice = netw.minGasPrice
 		}
 
+		redeemGas = netw.redeemGas
+
 		glog.Infof("***Livepeer is running on the %v network: %v***", *network, *ethController)
 	} else {
+		redeemGas = redeemGasL1
 		glog.Infof("***Livepeer is running on the %v network***", *network)
 	}
 
@@ -295,6 +317,7 @@ func main() {
 		n.OrchSecret, _ = common.GetPass(*orchSecret)
 	}
 
+	transcoderCaps := core.DefaultCapabilities()
 	if *transcoder {
 		core.WorkDir = *datadir
 		if *nvidia != "" {
@@ -306,9 +329,9 @@ func main() {
 			glog.Infof("Transcoding on these Nvidia GPUs: %v", devices)
 			// Test transcoding with nvidia
 			if *testTranscoder {
-				err := core.TestNvidiaTranscoder(devices)
+				transcoderCaps, err = core.TestTranscoderCapabilities(devices)
 				if err != nil {
-					glog.Fatalf("Unable to transcode using Nvidia gpu=%q err=%q", strings.Join(devices, ","), err)
+					glog.Fatal(err)
 				}
 			}
 			// FIXME: Short-term hack to pre-load the detection models on every device
@@ -327,6 +350,8 @@ func main() {
 			// Initialize LB transcoder
 			n.Transcoder = core.NewLoadBalancingTranscoder(devices, core.NewNvidiaTranscoder, core.NewNvidiaTranscoderWithDetector)
 		} else {
+			// for local software mode, enable all capabilities
+			transcoderCaps = append(core.DefaultCapabilities(), core.OptionalCapabilities()...)
 			n.Transcoder = core.NewLocalTranscoder(*datadir)
 		}
 	}
@@ -355,7 +380,12 @@ func main() {
 	lpmon.NodeID += hn
 
 	if *monitor {
+		if *metricsExposeClientIP {
+			*metricsPerStream = true
+		}
 		lpmon.Enabled = true
+		lpmon.PerStreamMetrics = *metricsPerStream
+		lpmon.ExposeClientIP = *metricsExposeClientIP
 		nodeType := lpmon.Default
 		switch n.NodeType {
 		case core.BroadcasterNode:
@@ -410,6 +440,26 @@ func main() {
 		if err != nil {
 			glog.Errorf("failed to get chain ID from remote ethereum node: %v", err)
 			return
+		}
+
+		// TODO: Remove after LIP-73 block (Arbitrum L2 contracts are unpaused)
+		arbitrumOneChainId := big.NewInt(42161)
+		lip73Block := big.NewInt(14207040)
+		if arbitrumOneChainId.Cmp(chainID) == 0 {
+			ethClient, err := blockwatch.NewRPCClient(*ethUrl, ethRPCTimeout)
+			if err != nil {
+				glog.Errorf("Failed to connect to Ethereum client: %v", err)
+				return
+			}
+			head, err := ethClient.HeaderByNumber(nil)
+			if err != nil {
+				glog.Errorf("Failed to get the latest block: %v", err)
+				return
+			}
+			if head.L1BlockNumber.Cmp(lip73Block) <= 0 {
+				glog.Errorf("LIP-73 has not been activated yet")
+				return
+			}
 		}
 
 		if !build.ChainSupported(chainID.Int64()) {
@@ -470,6 +520,10 @@ func main() {
 			glog.Errorf("Failed to set gas info on Livepeer Ethereum Client: %v", err)
 			return
 		}
+		if err := client.SetMaxGasPrice(bigMaxGasPrice); err != nil {
+			glog.Errorf("Failed to set max gas price: %v", err)
+			return
+		}
 
 		n.Eth = client
 
@@ -483,28 +537,10 @@ func main() {
 		}
 		topics := watchers.FilterTopics()
 
-		// Determine backfilling start block
-		originalLastSeenBlock, err := dbh.LastSeenBlock()
-		if err != nil {
-			glog.Errorf("db: failed to retrieve latest retained block: %v", err)
-			return
-		}
-		currentRoundStartBlock, err := client.CurrentRoundStartBlock()
-		if err != nil {
-			glog.Errorf("eth: failed to retrieve current round start block: %v", err)
-			return
-		}
-
-		var blockWatcherBackfillStartBlock *big.Int
-		if originalLastSeenBlock == nil || originalLastSeenBlock.Cmp(currentRoundStartBlock) < 0 {
-			blockWatcherBackfillStartBlock = currentRoundStartBlock
-		}
-
 		blockWatcherCfg := blockwatch.Config{
 			Store:               n.Database,
 			PollingInterval:     blockPollingTime,
 			StartBlockDepth:     rpc.LatestBlockNumber,
-			BackfillStartBlock:  blockWatcherBackfillStartBlock,
 			BlockRetentionLimit: blockWatcherRetentionLimit,
 			WithLogs:            true,
 			Topics:              topics,
@@ -933,12 +969,11 @@ func main() {
 		// take the port to listen to from the service URI
 		*httpAddr = defaultAddr(*httpAddr, "", n.GetServiceURI().Port())
 
-		caps := core.DefaultCapabilities()
 		if *sceneClassificationModelPath != "" {
 			// Only enable experimental capabilities if scene classification model is actually loaded
-			caps = append(caps, core.ExperimentalCapabilities()...)
+			transcoderCaps = append(transcoderCaps, core.ExperimentalCapabilities()...)
 		}
-		n.Capabilities = core.NewCapabilities(caps, core.MandatoryCapabilities())
+		n.Capabilities = core.NewCapabilities(transcoderCaps, core.MandatoryOCapabilities())
 
 		if !*transcoder && n.OrchSecret == "" {
 			glog.Fatal("Running an orchestrator requires an -orchSecret for standalone mode or -transcoder for orchestrator+transcoder mode")
@@ -1035,7 +1070,7 @@ func main() {
 			glog.Fatal("Starting a Livepool transcoder requires an ethereum address, use '-ethAcctAddr'")
 		}
 
-		go server.RunTranscoder(n, orchURLs, *maxSessions, ethcommon.HexToAddress(*ethAcctAddr))
+		go server.RunTranscoder(n, orchURLs, *maxSessions, transcoderCaps, ethcommon.HexToAddress(*ethAcctAddr))
 	}
 
 	switch n.NodeType {
