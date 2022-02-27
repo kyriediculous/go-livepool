@@ -1256,19 +1256,3 @@ func checkOrStoreChainID(dbh *common.DB, chainID *big.Int) error {
 
 	return nil
 }
-
-
-orchestrator
-transcoderPool
-reward
-monitor
-poolCommission 500
-orchSecret livepoolio-arb
-pricePerUnit 750
-blockPollingInterval 10
-network arbitrum-one-mainnet
-ethUrl https://arb-mainnet.g.alchemy.com/v2/XR0tvHZ2naQ00HnYS6UjMbaut0HKwsrv
-maxSessions
-maxGasPrice
-serviceAddr 161.35.157.107:8935
-v 6
