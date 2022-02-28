@@ -65,7 +65,7 @@ fi
 FILE_SHA256=`shasum -a 256 ${FILE}`
 
 # Quick self-check to see if the thing can execute at all
-(cd $BASE && $NODE -version)
+(cd $BASE && $POOL -version)
 
 if [[ "${GCLOUD_KEY:-}" == "" ]]; then
   echo "GCLOUD_KEY not found, not uploading to Google Cloud."
