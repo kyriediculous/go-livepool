@@ -47,8 +47,8 @@ ROUTER="./livepeer_router${EXT}"
 POOL="./livepool${EXT}"
 
 mkdir $BASE
-cp $NODE $BASE
-cp $CLI $BASE
+# cp $NODE $BASE
+# cp $CLI $BASE
 # cp $BENCH $BASE
 # cp $ROUTER $BASE
 cp $POOL $BASE
