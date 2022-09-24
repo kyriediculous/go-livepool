@@ -120,6 +120,11 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 	}
 
 	payout := bal.Sub(bal, txCost)
+
+	// Note that SendEth does not check whether the transaction confirms. Since this is a simple ETH send it can not actually revert
+	// Instead if the transaction is succesfully dispatched to an RPC we can say that it's probably gonna go through eventually
+	// Otherwise if takes longer than the ticker to confirm a transcoder can get paid twice because it would otherwise not be updated until the tx confirms
+	// which could be the case during gas price spike
 	err = pool.node.Eth.SendEth(payout, transcoder)
 	if err != nil {
 		return err

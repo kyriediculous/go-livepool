@@ -1146,9 +1146,5 @@ func (c *client) SendEth(amount *big.Int, to ethcommon.Address) error {
 		return err
 	}
 
-	if err := c.backend.SendTransaction(context.Background(), newSignedTx); err != nil {
-		return err
-	}
-
-	return c.CheckTx(newSignedTx)
+	return c.backend.SendTransaction(context.Background(), newSignedTx)
 }
