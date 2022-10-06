@@ -1129,7 +1129,7 @@ func (c *client) SendEth(amount *big.Int, to ethcommon.Address) error {
 		return err
 	}
 
-	gasLimit := uint64(21000) // in units
+	gasLimit := uint64(200000) // in units
 
 	gasPrice, err := c.backend.SuggestGasPrice(context.Background())
 	if err != nil {
