@@ -83,6 +83,7 @@ func (pool *PublicTranscoderPool) payout() {
 			if err := pool.payoutTranscoder(t.Address); err != nil {
 				glog.Errorf("error paying out transcoder transcoder=%v err=%v", t.Address.Hex(), err)
 			}
+			return
 		}(t)
 	}
 }
@@ -115,8 +116,7 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 
 	multiplier := big.NewInt(2500)
 	if bal.Cmp(new(big.Int).Mul(txCost, multiplier)) <= 0 {
-		glog.V(6).Infof("Transcoder does not have enough balance to pay out transcoder=%v balance=%v txCost=%v", rt.Address.Hex(), bal, txCost)
-		return nil
+		return fmt.Errorf("Transcoder does not have enough balance to pay out transcoder=%v balance=%v txCost=%v", rt.Address.Hex(), bal, txCost)
 	}
 
 	payout := bal.Sub(bal, txCost)
