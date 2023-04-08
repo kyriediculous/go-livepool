@@ -1129,17 +1129,23 @@ func (c *client) SendEth(amount *big.Int, to ethcommon.Address) error {
 		return err
 	}
 
-	gasLimit := uint64(200000) // in units
+	gasLimit := uint64(250000) // in units
 
 	gasPrice, err := c.backend.SuggestGasPrice(context.Background())
 	if err != nil {
 		return err
 	}
-	if err != nil {
-		return err
+	if gasPrice.Cmp(big.NewInt(1e9)) < 0 {
+		gasPrice = big.NewInt(1e9)
 	}
 
-	tx := types.NewTransaction(nonce, to, amount, gasLimit, gasPrice, nil)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    nonce,
+		To:       &to,
+		Value:    amount,
+		GasPrice: gasPrice,
+		Gas:      gasLimit,
+	})
 
 	newSignedTx, err := c.accountManager.SignTx(tx)
 	if err != nil {
