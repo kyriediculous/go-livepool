@@ -153,9 +153,15 @@ func (pool *PublicTranscoderPool) Reward(transcoder *RemoteTranscoder, td *Trans
 	if err != nil {
 		return err
 	}
+
+	var totalPixels int64
+	for _, s := range td.Segments {
+		totalPixels += s.Pixels
+	}
+
 	basePrice := pool.node.GetBasePrice()
 	price := new(big.Rat).Mul(basePrice, big.NewRat(feeShare, 100))
-	fees := new(big.Rat).Mul(price, big.NewRat(td.Pixels, 1))
+	fees := new(big.Rat).Mul(price, big.NewRat(totalPixels, 1))
 	commission := new(big.Rat).Mul(fees, big.NewRat(pool.commission.Int64(), 10000))
 	feesInt, ok := new(big.Int).SetString(fees.Sub(fees, commission).FloatString(0), 10)
 	if !ok {
