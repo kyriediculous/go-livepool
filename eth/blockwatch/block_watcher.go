@@ -20,7 +20,7 @@ import (
 // a hard limit of 10,000 logs returned by a single `eth_getLogs` query by Infura's Ethereum nodes so
 // we need to try and stay below it. Parity, Geth and Alchemy all have much higher limits (if any) on
 // the number of logs returned so Infura is by far the limiting factor.
-var maxBlocksInGetLogsQuery = 60
+var maxBlocksInGetLogsQuery = 1000
 
 // EventType describes the types of events emitted by blockwatch.Watcher. A block can be discovered
 // and added to our representation of the chain. During a block re-org, a block previously stored

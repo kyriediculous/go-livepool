@@ -54,13 +54,11 @@ func (pool *PublicTranscoderPool) StartPayoutLoop() {
 	sub := pool.roundSub(roundEvents)
 	defer sub.Unsubscribe()
 
-	ticker := time.NewTicker(payoutTicker)
-
 	for {
 		select {
 		case <-pool.quit:
 			return
-		case <-ticker.C:
+		case <-roundEvents:
 			pool.payout()
 		}
 	}
@@ -116,7 +114,7 @@ func (pool *PublicTranscoderPool) payoutTranscoder(transcoder ethcommon.Address)
 
 	multiplier := big.NewInt(2500)
 	if bal.Cmp(new(big.Int).Mul(txCost, multiplier)) <= 0 {
-		return fmt.Errorf("Transcoder does not have enough balance to pay out transcoder=%v balance=%v txCost=%v", rt.Address.Hex(), bal, txCost)
+		return nil
 	}
 
 	payout := bal.Sub(bal, txCost)
