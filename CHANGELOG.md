@@ -1,10 +1,366 @@
 # Changelog
 
+## v0.7.1
+
+### Breaking Changes 🚨🚨
+
+### Features ⚒
+
+#### Broadcaster
+- [#2884](https://github.com/livepeer/go-livepeer/pull/2884) Detect resolution change and reinit hw session (@leszko)
+- [#2883](https://github.com/livepeer/go-livepeer/pull/2883) Skip transcoding when empty profiles were sent to B (@leszko)
+
+#### General
+- [#2882](https://github.com/livepeer/go-livepeer/pull/2882) Add parameter to force HW Session Reinit (@leszko)
+
+## v0.7.0
+
+### Breaking Changes 🚨🚨
+
+### Features ⚒
+
+#### Broadcaster
+- [#2837](https://github.com/livepeer/go-livepeer/pull/2837) Set a floor of 1.5s for accepted Orchestrator response times, regardless of segment length (@thomshutt)
+- [#2839](https://github.com/livepeer/go-livepeer/pull/2839) Add Orchestrator blocklist CLI parameter (@mjh1)
+- [#2729](https://github.com/livepeer/go-livepeer/pull/2729) Switch to a custom error type for max transcode attempts (@mjh1)
+- [#2844](https://github.com/livepeer/go-livepeer/pull/2844) Exit early during verification when Orchestrator's address is nil (@ad-astra-video)
+- [#2842](https://github.com/livepeer/go-livepeer/pull/2842) Add Keys to public logs (@ad-astra-video)
+- [#2872](https://github.com/livepeer/go-livepeer/pull/2872) New Selection Algorithm (@leszko)
+
+#### Orchestrator
+- [#2781](https://github.com/livepeer/go-livepeer/pull/2781) Add automatic session limit and set max sessions with livepeer_cli (@eliteprox)
+- [#2848](https://github.com/livepeer/go-livepeer/pull/2848) Improve Transcode Quality (@leszko)
+- [#2851](https://github.com/livepeer/go-livepeer/pull/2851) Change scaling to `scale_npp` instead of `scale_cuda` (Linux-only) (@leszko)
+
+#### General
+- [#2843](https://github.com/livepeer/go-livepeer/pull/2843) Increase log level of payment creation (@iameli)
+- [#2850](https://github.com/livepeer/go-livepeer/pull/2850) Update default ports (@ad-astra-video)
+- [#2859](https://github.com/livepeer/go-livepeer/pull/2859) Update currentRound endpoint to return string instead of bytes (@ad-astra-video)
+- [#2878](https://github.com/livepeer/go-livepeer/pull/2878) Fix Mist JSON (@leszko)
+
+### Bug Fixes 🐞
+- [#2820](https://github.com/livepeer/go-livepeer/pull/2820) Fix segfault in setting a pricePerBroadcaster (@stronk-dev)
+
+#### CLI
+- [#2825](https://github.com/livepeer/go-livepeer/pull/2825) Enable quieter logging with -v=2 and -v=1 (@iameli)
+
+## v0.6.0
+
+### Breaking Changes 🚨🚨
+- [#2821](https://github.com/livepeer/go-livepeer/pull/2821) Bump nvidia/cuda base version for docker builds (@stronk-dev and @hjpotter92)
+
+### Features ⚒
+
+#### Broadcaster
+- [#2827](https://github.com/livepeer/go-livepeer/pull/2827) Introduce configurable Orchestrator blocklist (@mjh1)
+
+#### General
+- [#2758](https://github.com/livepeer/go-livepeer/pull/2758) Accept only active Os to receive traffic and redeem tickets (@leszko)
+- [#2775](https://github.com/livepeer/go-livepeer/pull/2775) Reduce number of ETH RPC calls during block polling (@leszko)
+- [#2815](https://github.com/livepeer/go-livepeer/pull/2815) Add new logging methods to publish a set of public logs (@emranemran)
+
+### Bug Fixes 🐞
+- [#2759](https://github.com/livepeer/go-livepeer/pull/2759) Parse keystore address without 0x prefix, fix parse error logging
+- [#2764](https://github.com/livepeer/go-livepeer/pull/2764) Call session end asynchronously to avoid unnecessary blocking (@mjh1)
+- [#2777](https://github.com/livepeer/go-livepeer/pull/2777) Only write session end log message if session exists (@mjh1)
+- [#2804](https://github.com/livepeer/go-livepeer/pull/2804) Bump livepeer-data and go version due to breaking interface change (@victorges)
+
+## v0.5.38
+
+### Breaking Changes 🚨🚨
+
+None
+
+### Bug Fixes 🐞
+
+#### Broadcaster
+- [#2709](https://github.com/livepeer/go-livepeer/pull/2709) Add logging for high keyframe interval, reduce log level for discovery loop
+- [#2684](https://github.com/livepeer/go-livepeer/pull/2684) Fix transcode success rate metric
+- [#2740](https://github.com/livepeer/go-livepeer/pull/2740) Fix incorrect processing of VerificationFreq parameter
+- [#2735](https://github.com/livepeer/go-livepeer/pull/2735) Fix EndTranscodingSession() call and potential race
+- [#2747](https://github.com/livepeer/go-livepeer/pull/2747) Fixed a transcoding bug that occurred when remote transcoder was removed
+
+#### General
+- [#2713](https://github.com/livepeer/go-livepeer/pull/2713) Add support for keyfiles with -ethKeystorePath, update flag descriptions, flagset output to stdout
+
+## v0.5.37
+
+### Breaking Changes 🚨🚨
+- Potentially breaking for environments with tight disk space: the docker image is 700 Mb larger now, because of bundled Tensorflow libraries
+
+#### General
+- [#2697](https://github.com/livepeer/go-livepeer/pull/2697) Fix backwards compatibility of livepeer_cli with prior livepeer version (@eliteprox)
+
+#### Broadcaster
+- [#2709](https://github.com/livepeer/go-livepeer/pull/2709) Add logging for high keyframe interval, reduce log level for discovery loop (@eliteprox)
+- [#2684](https://github.com/livepeer/go-livepeer/pull/2684) Fix transcode success rate metric to better account for errors (@mjh1)
+- [#357](https://github.com/livepeer/lpms/pull/357) Tune fast verification signature comparison (@cyberj0g)
+
+#### Orchestrator
+- [#2707](https://github.com/livepeer/go-livepeer/pull/2707) Fix remote transcoders quietly getting dropped from selection (@stronk-dev)
+- [#2710](https://github.com/livepeer/go-livepeer/pull/2710) Fix `Invalid Ticket senderNonce` error when segments are sent from B to O out of order or in parallel (@cyberj0g)
+
+#### Transcoder
+- [#2686](https://github.com/livepeer/go-livepeer/pull/2686) Control non-stream specific scene classification with command line args (@cyberj0g)
+- [#2705](https://github.com/livepeer/go-livepeer/pull/2705) Fix: standalone transcoder will not exit when orchestrator disconnects or terminates the session (@stronk-dev)
+
+## v0.5.36
+
+#### General
+- [#2696](https://github.com/livepeer/go-livepeer/pull/2696) Add Rinkeby network deprecation warning (@leszko)
+
+#### Transcoder
+- [#2686](https://github.com/livepeer/go-livepeer/pull/2686) Control non-stream specific scene classification with command line args
+
+#### General
+
+- [#2635](https://github.com/livepeer/go-livepeer/pull/2635) Fix entrypoint path in built docker images (@hjpotter92)
+- [#2646](https://github.com/livepeer/go-livepeer/pull/2646) Include HttpIngest and LocalVerify in param table on startup (@yondonfu)
+
+#### Broadcaster
+
+- [#2666](https://github.com/livepeer/go-livepeer/pull/2666) Re-use a session as long as it passes the latency score threshold check (@yondonfu)
+
+#### Orchestrator
+- [#2639](https://github.com/livepeer/go-livepeer/pull/2639) Increase IdleTimeout for HTTP connections (@leszko)
+- [#2685](https://github.com/livepeer/go-livepeer/pull/2685) Add a log message when sessions are closed by the Broadcaster. Increase transcode loop timeout (@mj1)
+
+## v0.5.35
+
+*October 21 2022*
+
+This release contains a number of node stability and quality of life improvements.
+
+### Breaking Changes 🚨🚨
+None
+
+#### General
+- [#2616](https://github.com/livepeer/go-livepeer/pull/2616) cmd: Echo explicitly set config values on node start
+- [#2583](https://github.com/livepeer/go-livepeer/pull/2583) eth: Set tx GasFeeCap to min(gasPriceEstimate, current GasFeeCap) (@yondonfu)
+- [#2586](https://github.com/livepeer/go-livepeer/pull/2586) Broadcaster: Don't pass a nil context into grpc call or it panics (@thomshutt, @cyberj0g)
+
+#### Broadcaster
+- [#2573](https://github.com/livepeer/go-livepeer/pull/2573) server: Fix timeout for stream recording background jobs (@victorges)
+- [#2586](https://github.com/livepeer/go-livepeer/pull/2586) Refactor RTMP connection object management to prevent race conditions (@cyberj0g)
+
+#### Orchestrator
+- [#2591](https://github.com/livepeer/go-livepeer/pull/2591) Return from transcode loop if transcode session is ended by B (@yondonfu)
+- [#2592](https://github.com/livepeer/go-livepeer/pull/2592) Enable Orchestrator to set pricing by broadcaster ETH address
+- [#2628](https://github.com/livepeer/go-livepeer/pull/2628) Use IdleTimeout to prevent hanging HTTP connections when B does not use O (fix "too many files open" error) (@leszko)
+
+## v0.5.34
+
+*August 16 2022*
+
+This release fixes issues with short segments timing out at the upload stage and with `unsupported block number` errors. It also contains a change to prepare for the upcoming Arbitrum Nitro migration.
+
+### Breaking Changes 🚨🚨
+None
+
+#### General
+- [#2550](https://github.com/livepeer/go-livepeer/pull/2550) Fix requesting LPT from faucet after the Nitro migration (@leszko)
+- [#2563](https://github.com/livepeer/go-livepeer/pull/2563) Fix unsupported block number errors (@yondonfu)
+
+#### Broadcaster
+- [#2541](https://github.com/livepeer/go-livepeer/pull/2541) Enforce a minimum timeout for segment upload (@victorges)
+
+
+## v0.5.33
+
+*July 18 2022*
+
+This release contains optimisations to speed up the block backfill process, a number of fixes for transcoding bugs and a switch to using a lower `avgGasPrice` to prevent dropping streams during gas price spikes.
+
+### Breaking Changes 🚨🚨
+
+None
+
+### Features ⚒
+
+#### General
+- [#1333](https://github.com/livepeer/go-livepeer/pull/1333) Display git-sha in startup logging (@emranemran)
+- [#2443](https://github.com/livepeer/go-livepeer/pull/2443) Add e2e tests for O configuration and resignation (@red-0ne)
+- [#2489](https://github.com/livepeer/go-livepeer/pull/2489) Backfill blocks in batches (@leszko)
+
+#### Broadcaster
+- [#2462](https://github.com/livepeer/go-livepeer/pull/2462) cmd: Delete temporary env variable LP_IS_ORCH_TESTER (@leszko)
+
+#### Orchestrator
+- [#2465](https://github.com/livepeer/go-livepeer/pull/2465) server: Don't fail to get Transcode Results if Detections header missing (@thomshutt)
+
+#### Transcoder
+
+### Bug Fixes 🐞
+
+- [#2466](https://github.com/livepeer/go-livepeer/pull/2466) bugfix: rendition resolution fix for portrait input videos; Min resolution applied for Nvidia hardware (@AlexKordic)
+- [#338](https://github.com/livepeer/go-livepeer/pull/338) lpms: Add exception handling code for importing a binary signature (@oscar_davids)
+- [#337](https://github.com/livepeer/go-livepeer/pull/337) lpms: fix the audio missing issue during transcoding (@oscar_davids)
+
+#### CLI
+- [#2456](https://github.com/livepeer/go-livepeer/pull/2456) cli: Show O rather than B options when -redeemer flag set (@thomshutt)
+
+#### General
+
+#### Broadcaster
+
+#### Orchestrator
+- [#2493](https://github.com/livepeer/go-livepeer/pull/2493) cmd: Fix reward flag (@leszko)
+- [#2481](https://github.com/livepeer/go-livepeer/pull/2481) Lower `avgGasPrice` to prevent dropping streams during the gas price spikes (@leszko)
+
+#### Transcoder
+
+## v0.5.32
+
+*June 9 2022*
+
+This release adds new content detection feature for Nvidia Transcoders that can be run if requested by transcoding job.
+It also includes some CLI bug fixes.
+
+### Breaking Changes 🚨🚨
+
+None
+
+### Features ⚒
+
+#### General
+- [#2429](https://github.com/livepeer/go-livepeer/pull/2429) Binaries are uploaded to gcp cloud storage following the new directory structure (@hjpotter92)
+- [#2437](https://github.com/livepeer/go-livepeer/pull/2437) Make CLI flag casing consistent for dataDir flag (@thomshutt)
+- [#2440](https://github.com/livepeer/go-livepeer/pull/2440) Create and push `go-livepeer:latest` tagged images to dockerhub (@hjpotter92)
+
+#### Broadcaster
+- [#2327](https://github.com/livepeer/go-livepeer/pull/2327) Parallelize handling events in Orchestrator Watcher (@red-0ne)
+
+#### Orchestrator
+- [#2290](https://github.com/livepeer/go-livepeer/pull/2290) Allow orchestrator to set max ticket faceValue (@0xB79)
+
+### Bug Fixes 🐞
+- [#2339](https://github.com/livepeer/go-livepeer/pull/2339) Fix failing `-nvidia all` flag on VM (@red-0ne)
+
+#### CLI
+- [#2438](https://github.com/livepeer/go-livepeer/pull/2438) Add new menu option to gracefully exit livepeer_cli (@emranemran)
+- [#2431](https://github.com/livepeer/go-livepeer/pull/2431) New flag to enable content detection on Nvidia Transcoder: `-detectContent`. When set, Transcoder will initialize Tensorflow runtime on each Nvidia GPU, and will run an additional Detector profile, if requested by the transcoding job.(@cyberj0g)
+
+## v0.5.31
+
+*May 23 2022*
+
+This release removes special handling for single frame segments from the previous release that was causing transcoding issues with certain types of content.
+
+It also introduces a number of fixes around making the Stream Tester more reliable and a CLI fix to choose more logical default address.
+
+### Breaking Changes 🚨🚨
+
+None
+
+### Features ⚒
+
+#### General
+- [#2383](https://github.com/livepeer/go-livepeer/pull/2383) Add E2E Tests for checking Livepeer on-chain interactions (@leszko)
+- [#2223](https://github.com/livepeer/go-livepeer/pull/2223) Refactor `drivers` package as a reusable and more performant lib (@victorges)
+
+#### Broadcaster
+- [#2392](https://github.com/livepeer/go-livepeer/pull/2392) Add LP_EXTEND_TIMEOUTS env variable to extend timeouts for Stream Tester (@leszko)
+- [#2413](https://github.com/livepeer/go-livepeer/pull/2413) Fix Webhook discovery, refresh pool before getting pool size (@leszko)
+
+### Orchestrator
+- [#](https://github.com/livepeer/go-livepeer/pull/)#2423 Revert problematic single segment fix (@thomshutt)
+
+### CLI
+- [#2416](https://github.com/livepeer/go-livepeer/pull/2416) Use the O's currently registered Service URI as default address (@emranemran)
+
+## v0.5.30
+
+*May 11 2022*
+
+This release includes support for Netint transcoding hardware, dynamic timeouts for Orchestrator discovery, protection against rounds with a zero block hash and a number of small Orchestrator bug fixes.
+
+### Breaking Changes 🚨🚨
+
+None
+
+### Features ⚒
+
+#### General
+- [#2348](https://github.com/livepeer/go-livepeer/pull/2348) Support Netint transcoding hardware (@cyberj0g)
+- [#2289](https://github.com/livepeer/go-livepeer/pull/2289) Add timeouts to ETH client (@leszko)
+- [#2282](https://github.com/livepeer/go-livepeer/pull/2282) Add checksums and gpg signature support with binary releases. (@hjpotter92)
+- [#2344](https://github.com/livepeer/go-livepeer/pull/2344) Use T.TempDir to create temporary test directory (@Juneezee)
+- [#2353](https://github.com/livepeer/go-livepeer/pull/2353) Codesign and notarize macOS binaries to be allowed to run without warnings on apple devices (@hjpotter92)
+- [#2351](https://github.com/livepeer/go-livepeer/pull/2351) Refactor livepeer.go to enable running Livepeer node from the code (@leszko)
+- [#2372](https://github.com/livepeer/go-livepeer/pull/2372) Upload test coverage reports to codecov (@hjpotter92)
+
+#### Broadcaster
+- [#2309](https://github.com/livepeer/go-livepeer/pull/2309) Add dynamic timeout for the orchestrator discovery (@leszko)
+
+#### Orchestrator
+- [#2362](https://github.com/livepeer/go-livepeer/pull/2362) Backdate tickets by one round if the block hash for the current round is 0 (@leszko)
+
+#### Transcoder
+
+### Bug Fixes 🐞
+- [#2355](https://github.com/livepeer/go-livepeer/pull/2355) Fix ZeroSegments error (@AlexKordic)
+
+#### CLI
+- [#2345](https://github.com/livepeer/go-livepeer/pull/2345) Improve user feedback when specifying numeric values for some wizard options (@kparkins)
+
+#### General
+- [#2299](https://github.com/livepeer/go-livepeer/pull/2299) Split devtool Orchestrator run scripts into versions with/without external transcoder and prevent Transcoder/Broadcaster run scripts from using same CLI port (@thomshutt)
+- [#2346](https://github.com/livepeer/go-livepeer/pull/2346) Fix syntax errors in example JSON (@thomshutt)
+
+#### Broadcaster
+- [#2291](https://github.com/livepeer/go-livepeer/pull/2291) Calling video comparison to improve the security strength (@oscar-davids)
+- [#2326](https://github.com/livepeer/go-livepeer/pull/2326) Split Auth/Webhook functionality into its own file (@thomshutt)
+- [#2357](https://github.com/livepeer/go-livepeer/pull/2357) Begin accepting auth header (from Mist) and have it override callback URL values (@thomshutt)
+- [#2385](https://github.com/livepeer/go-livepeer/pull/2385) Change verification randomness variable meaning (@thomshutt)
+
+#### Orchestrator
+- [#2284](https://github.com/livepeer/go-livepeer/pull/2284) Fix issue with not redeeming tickets by Redeemer (@leszko)
+- [#2352](https://github.com/livepeer/go-livepeer/pull/2352) Fix standalone orchestrator not crashing under UnrecoverableError (@leszko)
+- [#2359](https://github.com/livepeer/go-livepeer/pull/2359) Fix redeeming tickets with zero block hash (@leszko)
+- [#2390](https://github.com/livepeer/go-livepeer/pull/2390) Fix Orchestrator registration error when we receive an empty HTTP body (@leszko)
+
+#### Transcoder
+- N/A
+
+## v0.5.29
+
+*February 21 2022*
+
+This release is a fast follow release for v0.5.28 with a few bug fixes including a fix for a nil pointer error when parsing block header logs that could cause the node to crash and a fix for displaying the global LPT supply and participation rate in `livepeer_cli`.
+
+This release also includes a darwin arm64 build and darwin/linux binaries compiled using Go 1.17.6.
+
+### Breaking Changes 🚨🚨
+
+- The `segment_transcoded_appeared_total` and `transcode_latency_seconds` metrics are removed because they were tracked per transcoding profile and the node already tracks the overall version of the metrics
+- The `upload_time_seconds` and `discovery_errors_toatl` metrics are tracked per orchestrators instead of per stream
+
+### Features ⚒
+
+#### General
+
+- [#2274](https://github.com/livepeer/go-livepeer/pull/2274) Reduce the number of metrics datapoints (@darkdragon)
+
+#### Transcoder
+
+- [#2259](https://github.com/livepeer/go-livepeer/pull/2259) Improve startup capability test to check for Nvidia encoder session limit and to fail fast if a default capability is not supported (@cyberj0g)
+
+### Bug Fixes 🐞
+
+#### General
+
+- [#2267](https://github.com/livepeer/go-livepeer/pull/2267) Fix nil pointer in the block header logs (@leszko)
+- [#2276](https://github.com/livepeer/go-livepeer/pull/2276) Use global total supply instead of L2 supply to calculate participation rate on Arbitrum networks (@leszko)
+
+#### Orchestrator
+
+- [#2266](https://github.com/livepeer/go-livepeer/pull/2266) Fix default reward cut and fee cut in `livepeer_cli` (@leszko)
+
 ## v0.5.28
 
 *February 11th 2022*
 
-This release supports connecting to Arbitrum Mainnet using the `-network arbitrum-one-mainnet` flag after the L1 Ethereum block 14207040 which is the block at which [LIP-73 i.e. the Confluence upgrade](https://github.com/livepeer/LIPs/blob/master/LIPs/LIP-73.md#specification) will be activated. Prior to this block, running the node wtih `-network arbitrum-one-mainnet` will result in a startup error so it is recommended to wait until after block 14207040 to run the node with the `-network arbitrum-one-mainnet` flag. **We strongly encourage all node operators to upgrade to this release so they can connect to Arbitrum Mainnet after the LIP-73 block**.
+This release supports connecting to Arbitrum Mainnet using the `-network arbitrum-one-mainnet` flag after the L1 Ethereum block 14207040 which is the block at which [LIP-73 i.e. the Confluence upgrade](https://github.com/livepeer/LIPs/blob/master/LIPs/LIP-73.md#specification) will be activated. Prior to this block, running the node with `-network arbitrum-one-mainnet` will result in a startup error so it is recommended to wait until after block 14207040 to run the node with the `-network arbitrum-one-mainnet` flag. **We strongly encourage all node operators to upgrade to this release so they can connect to Arbitrum Mainnet after the LIP-73 block**.
 
 Additional updates in this release include various improvements to compatibility with Arbitrum networks as well as the initial groundwork for enabling H.265/HEVC encoding/decoding and VP8/VP9 decoding jobs on the network.
 
@@ -129,7 +485,7 @@ Additional highlights of this release:
 - Support for running fast verification on broadcasters
 - Support for configuring `livepeer` using a file. See [the docs](https://livepeer.org/docs/installation/configuring-livepeer) for instructions on using a configuration file
 - An improvement to the failover behavior in split orchestrator + transcoder setups in the scenario where a transcoder crashes
-- Ensure that the the fee per gas for a transaction never exceeds the value set for `-maxGasPrice` 
+- Ensure that the the fee per gas for a transaction never exceeds the value set for `-maxGasPrice`
 
 Thanks to everyone that submitted bug reports and assisted in testing!
 
@@ -288,7 +644,7 @@ Thanks to everyone that submitted bug reports and assisted in testing!
 
 *August 10 2021*
 
-This release includes another gas price monitoring fix to address additional cases where Ethereum JSON-RPC providers occassionally return really low gas prices for the `eth_gasPrice` RPC call, automatic replacements for pending transactions that timeout, fixes for broadcaster stream recording, support for downloading stream recordings as mp4 files as well as variety of other bug fixes and enhancements.
+This release includes another gas price monitoring fix to address additional cases where Ethereum JSON-RPC providers occasionally return really low gas prices for the `eth_gasPrice` RPC call, automatic replacements for pending transactions that timeout, fixes for broadcaster stream recording, support for downloading stream recordings as mp4 files as well as variety of other bug fixes and enhancements.
 
 In addition to the gas price monitoring fix and support for automatic replacements for pending transactions that timeout, a few additional configuration options are introduced to give node operators more control over gas prices and transactions:
 
@@ -348,7 +704,7 @@ Thanks to everyone that submitted bug reports and assisted in testing!
 
 *May 18 2021*
 
-This release includes an important gas price monitoring fix that addresses cases where Ethereum JSON-RPC providers occassionally return really low gas prices for the `eth_gasPrice` RPC call, reductions in the gas cost for staking actions (under certain circumstances) using `livepeer_cli`  and improvements to split orchestrator and transcoder setups that help remote transcoders retain streams. We strongly recommend all orchestrator and transcoder operators to upgrade to this version as soon as possible to access this latest set of bug fixes and improvements.
+This release includes an important gas price monitoring fix that addresses cases where Ethereum JSON-RPC providers occasionally return really low gas prices for the `eth_gasPrice` RPC call, reductions in the gas cost for staking actions (under certain circumstances) using `livepeer_cli`  and improvements to split orchestrator and transcoder setups that help remote transcoders retain streams. We strongly recommend all orchestrator and transcoder operators to upgrade to this version as soon as possible to access this latest set of bug fixes and improvements.
 
 Thanks to everyone that submitted bug reports and assisted in testing!
 
@@ -431,7 +787,7 @@ Thanks to everyone that submitted bug reports and assisted in testing!
 
 *March 29 2021*
 
-This release includes an important fix for a bug that could cause broadcasters to crash due to missing data in responses from misconfigured orchestrators. We strongly recommend that all broadcaster operators upgrade to this version as soon as possible to access this bug fix. 
+This release includes an important fix for a bug that could cause broadcasters to crash due to missing data in responses from misconfigured orchestrators. We strongly recommend that all broadcaster operators upgrade to this version as soon as possible to access this bug fix.
 
 If you are not a broadcaster operator, then upgrading to this release is not urgent.
 

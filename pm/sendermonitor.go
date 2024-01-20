@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/golang/glog"
@@ -272,7 +273,6 @@ func (sm *LocalSenderMonitor) cache(addr ethcommon.Address) {
 	queue.Start()
 	done := make(chan struct{})
 	go sm.startTicketQueueConsumerLoop(queue, done)
-
 	sm.senders[addr] = &remoteSender{
 		pendingAmount: big.NewInt(0),
 		queue:         queue,
@@ -347,6 +347,7 @@ func (sm *LocalSenderMonitor) cleanup() {
 			v.subScope.Close() // close the maxfloat subscriptions
 			delete(sm.senders, k)
 			sm.smgr.Clear(k)
+			glog.V(6).Infof("sender cleared from cache addr: %v last access: %v ttl: %vs", hexutil.Encode(k.Bytes()), v.lastAccess, sm.cfg.TTL)
 		}
 	}
 }
@@ -404,7 +405,7 @@ func (sm *LocalSenderMonitor) redeemWinningTicket(ticket *SignedTicket) (*types.
 		//
 		// TODO(yondonfu): Should ultimately add back only the amount that
 		// was actually successfully redeemed in order to take into account
-		// the case where the ticket was not redeemd for its full face value
+		// the case where the ticket was not redeemed for its full face value
 		// because the reserve was insufficient
 		if err := sm.addFloat(ticket.Ticket.Sender, ticket.Ticket.FaceValue); err != nil {
 			glog.Error(err)

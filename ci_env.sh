@@ -3,7 +3,7 @@
 # Script to populate some environment variables in various CI processes. Should be
 # invoked by `ci_env.sh [script-name]`.
 
-set -e
+set -eo pipefail
 
 # Populate necessary Windows build path stuff
 if [[ $(uname) == *"MSYS"* ]]; then
@@ -26,6 +26,11 @@ if [[ "${CIRCLE_BRANCH:-}" != "" ]]; then
   branch="$CIRCLE_BRANCH"
 elif [[ "${TRAVIS_BRANCH:-}" != "" ]]; then
   branch="$TRAVIS_BRANCH"
+<<<<<<< HEAD
+=======
+elif [[ "${GITHUB_REF_NAME:-}" != "" ]]; then
+  branch="$GITHUB_REF_NAME"
+>>>>>>> livepeer/master
 fi
 
 # By default we build with mainnet support
@@ -53,6 +58,10 @@ export BUILD_TAGS="$HIGHEST_CHAIN_TAG"
 # Only build with experimental tag for non-semver tagged releases
 if [[ $generatedVersion != $definedVersion ]]; then
   export BUILD_TAGS="${BUILD_TAGS},experimental"
+fi
+
+if [[ "$CI" == "true" ]]; then
+  echo "build-tags=${BUILD_TAGS}" >>"$GITHUB_OUTPUT"
 fi
 
 exec "$@"

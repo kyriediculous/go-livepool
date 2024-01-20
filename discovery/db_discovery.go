@@ -36,9 +36,10 @@ type DBOrchestratorPoolCache struct {
 	ticketParamsValidator ticketParamsValidator
 	rm                    common.RoundsManager
 	bcast                 common.Broadcaster
+	orchBlacklist         []string
 }
 
-func NewDBOrchestratorPoolCache(ctx context.Context, node *core.LivepeerNode, rm common.RoundsManager) (*DBOrchestratorPoolCache, error) {
+func NewDBOrchestratorPoolCache(ctx context.Context, node *core.LivepeerNode, rm common.RoundsManager, orchBlacklist []string) (*DBOrchestratorPoolCache, error) {
 	if node.Eth == nil {
 		return nil, fmt.Errorf("could not create DBOrchestratorPoolCache: LivepeerEthClient is nil")
 	}
@@ -49,6 +50,7 @@ func NewDBOrchestratorPoolCache(ctx context.Context, node *core.LivepeerNode, rm
 		ticketParamsValidator: node.Sender,
 		rm:                    rm,
 		bcast:                 core.NewBroadcaster(node),
+		orchBlacklist:         orchBlacklist,
 	}
 
 	if err := dbo.cacheTranscoderPool(); err != nil {
@@ -70,7 +72,7 @@ func (dbo *DBOrchestratorPoolCache) getURLs() ([]*url.URL, error) {
 	orchs, err := dbo.store.SelectOrchs(
 		&common.DBOrchFilter{
 			MaxPrice:       server.BroadcastCfg.MaxPrice(),
-			CurrentRound:   dbo.nextRound(),
+			CurrentRound:   dbo.rm.LastInitializedRound(),
 			UpdatedLastDay: true,
 		},
 	)
@@ -96,23 +98,8 @@ func (dbo *DBOrchestratorPoolCache) GetInfos() []common.OrchestratorLocalInfo {
 	return infos
 }
 
-func (dbo *DBOrchestratorPoolCache) GetInfo(uri string) common.OrchestratorLocalInfo {
-	uris, _ := dbo.getURLs()
-	res := common.OrchestratorLocalInfo{
-		Score: common.Score_Untrusted,
-	}
-
-	for _, uri_ := range uris {
-		if uri_.String() == uri {
-			res.URL = uri_
-			break
-		}
-	}
-	return res
-}
-
 func (dbo *DBOrchestratorPoolCache) GetOrchestrators(ctx context.Context, numOrchestrators int, suspender common.Suspender, caps common.CapabilityComparator,
-	scorePred common.ScorePred) ([]*net.OrchestratorInfo, error) {
+	scorePred common.ScorePred) (common.OrchestratorDescriptors, error) {
 
 	uris, err := dbo.getURLs()
 	if err != nil || len(uris) <= 0 {
@@ -155,7 +142,7 @@ func (dbo *DBOrchestratorPoolCache) GetOrchestrators(ctx context.Context, numOrc
 		return true
 	}
 
-	orchPool := NewOrchestratorPoolWithPred(dbo.bcast, uris, pred, common.Score_Untrusted)
+	orchPool := NewOrchestratorPoolWithPred(dbo.bcast, uris, pred, common.Score_Untrusted, dbo.orchBlacklist)
 	orchInfos, err := orchPool.GetOrchestrators(ctx, numOrchestrators, suspender, caps, scorePred)
 	if err != nil || len(orchInfos) <= 0 {
 		return nil, err
@@ -168,7 +155,7 @@ func (dbo *DBOrchestratorPoolCache) Size() int {
 	count, _ := dbo.store.OrchCount(
 		&common.DBOrchFilter{
 			MaxPrice:       server.BroadcastCfg.MaxPrice(),
-			CurrentRound:   dbo.nextRound(),
+			CurrentRound:   dbo.rm.LastInitializedRound(),
 			UpdatedLastDay: true,
 		},
 	)
@@ -200,7 +187,7 @@ func (dbo *DBOrchestratorPoolCache) cacheTranscoderPool() error {
 func (dbo *DBOrchestratorPoolCache) cacheOrchestratorStake() error {
 	orchs, err := dbo.store.SelectOrchs(
 		&common.DBOrchFilter{
-			CurrentRound: dbo.nextRound(),
+			CurrentRound: dbo.rm.LastInitializedRound(),
 		},
 	)
 	if err != nil {
@@ -276,7 +263,7 @@ func (dbo *DBOrchestratorPoolCache) pollOrchestratorInfo(ctx context.Context) er
 func (dbo *DBOrchestratorPoolCache) cacheDBOrchs() error {
 	orchs, err := dbo.store.SelectOrchs(
 		&common.DBOrchFilter{
-			CurrentRound: dbo.nextRound(),
+			CurrentRound: dbo.rm.LastInitializedRound(),
 		},
 	)
 	if err != nil {
@@ -351,13 +338,6 @@ func (dbo *DBOrchestratorPoolCache) cacheDBOrchs() error {
 	}
 
 	return nil
-}
-
-func (dbo *DBOrchestratorPoolCache) nextRound() *big.Int {
-	if dbo.rm.LastInitializedRound() == nil {
-		return nil
-	}
-	return new(big.Int).Add(dbo.rm.LastInitializedRound(), big.NewInt(1))
 }
 
 func parseURI(addr string) (*url.URL, error) {

@@ -5,7 +5,8 @@
   "bitrate": 250000,
   "width": 426,
   "height": 240,
-  "profile": "h264constrainedhigh"
+  "profile": "h264constrainedhigh",
+  "gop": "1"
 },
 {
   "name": "360p0",
@@ -13,7 +14,8 @@
   "bitrate": 800000,
   "width": 640,
   "height": 360,
-  "profile": "h264constrainedhigh"
+  "profile": "h264constrainedhigh",
+  "gop": "1"
 },
 {
   "name": "480p0",
@@ -21,7 +23,8 @@
   "bitrate": 1600000,
   "width": 854,
   "height": 480,
-  "profile": "h264constrainedhigh"
+  "profile": "h264constrainedhigh",
+  "gop": "1"
 },
 {
   "name": "720p0",
@@ -29,6 +32,7 @@
   "bitrate": 3000000,
   "width": 1280,
   "height": 720,
-  "profile": "h264constrainedhigh"
+  "profile": "h264constrainedhigh",
+  "gop": "1"
 }
 ]

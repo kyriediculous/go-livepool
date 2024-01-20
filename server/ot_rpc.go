@@ -34,7 +34,6 @@ import (
 	"github.com/livepeer/go-livepeer/clog"
 	"github.com/livepeer/go-livepeer/common"
 	"github.com/livepeer/go-livepeer/core"
-	"github.com/livepeer/go-livepeer/drivers"
 	"github.com/livepeer/go-livepeer/monitor"
 	"github.com/livepeer/go-livepeer/net"
 )
@@ -162,11 +161,16 @@ func runTranscoder(n *core.LivepeerNode, orchAddr string, capacity int, caps []c
 			wg.Wait()
 			return err
 		}
-		wg.Add(1)
-		go func() {
-			runTranscode(n, orchAddr, httpc, notify)
-			wg.Done()
-		}()
+		if notify.SegData != nil && notify.SegData.AuthToken != nil && len(notify.SegData.AuthToken.SessionId) > 0 && len(notify.Url) == 0 {
+			// session teardown signal
+			n.Transcoder.EndTranscodingSession(notify.SegData.AuthToken.SessionId)
+		} else {
+			wg.Add(1)
+			go func() {
+				runTranscode(n, orchAddr, httpc, notify)
+				wg.Done()
+			}()
+		}
 	}
 }
 
@@ -197,7 +201,7 @@ func runTranscode(n *core.LivepeerNode, orchAddr string, httpc *http.Client, not
 		sendTranscodeResult(ctx, n, orchAddr, httpc, notify, contentType, &body, tData, errCapabilities)
 		return
 	}
-	data, err := drivers.GetSegmentData(ctx, notify.Url)
+	data, err := core.GetSegmentData(ctx, notify.Url)
 	if err != nil {
 		clog.Errorf(ctx, "Transcoder cannot get segment from taskId=%d url=%s err=%q", notify.TaskId, notify.Url, err)
 		sendTranscodeResult(ctx, n, orchAddr, httpc, notify, contentType, &body, tData, err)
@@ -294,6 +298,7 @@ func sendTranscodeResult(ctx context.Context, n *core.LivepeerNode, orchAddr str
 	req.Header.Set("Credentials", n.OrchSecret)
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("TaskId", strconv.FormatInt(notify.TaskId, 10))
+
 	pixels := int64(0)
 	if tData != nil {
 		pixels = tData.Pixels
@@ -395,7 +400,7 @@ func (h *lphttp) TranscodeResults(w http.ResponseWriter, r *http.Request) {
 		} else {
 			res.Err = fmt.Errorf(string(body))
 		}
-		glog.Errorf("Trascoding error for taskId=%v err=%q", tid, res.Err)
+		glog.Errorf("Transcoding error for taskId=%v err=%q", tid, res.Err)
 		orch.TranscoderResults(tid, &res)
 		return
 	}

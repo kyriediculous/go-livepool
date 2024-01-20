@@ -7,6 +7,7 @@ service Orchestrator {
 
   // Called by the broadcaster to request transcoder info from an orchestrator.
   rpc GetOrchestrator(OrchestratorRequest) returns (OrchestratorInfo);
+  rpc EndTranscodingSession(EndTranscodingSessionRequest) returns (EndTranscodingSessionResponse);
   rpc Ping(PingPong) returns (PingPong);
 }
 
@@ -23,6 +24,14 @@ message PingPong {
 
 }
 
+// sent by Broadcaster to Orchestrator to terminate the transcoding session and free resources (used for verification sessions)
+message EndTranscodingSessionRequest {
+  // Data for transcoding authentication
+  AuthToken auth_token   = 1;
+}
+
+message EndTranscodingSessionResponse {
+}
 
 // This request is sent by the broadcaster in `GetTranscoder` to request
 // information on which transcoder to use.
@@ -92,6 +101,9 @@ message Capabilities {
     // Bit string of features that are required to be supported
     repeated uint64 mandatories = 2;
 
+    // Capacity corresponding to each capability
+    map<uint32, uint32> capacities = 3;
+
     // Non-binary capability constraints, such as supported ranges.
     message Constraints {
             // Empty for now
@@ -137,34 +149,6 @@ message AuthToken {
   int64 expiration = 3;
 }
 
-// [EXPERIMENTAL]
-// Describes a class that a model is trained to detect
-message DetectorClass {
-  // ID of the class to detect
-  uint32 class_id = 1;
-
-  // Name of the class to detect
-  string class_name = 2;
-}
-
-// [EXPERIMENTAL]
-// Describes the scene classification configuration
-message SceneClassificationProfile {
-  // Sample rate of the frames picked by the O for scene detection
-  uint32 sample_rate = 1;
-
-  // List of output classes the model is trained to detect
-  repeated DetectorClass classes = 2;
-}
-
-// [EXPERIMENTAL]
-// Describes the content detection configuration
-message DetectorProfile {
-  oneof value {
-    SceneClassificationProfile scene_classification = 1;
-  }
-}
-
 // Data included by the broadcaster when submitting a segment for transcoding.
 message SegData {
 
@@ -193,10 +177,6 @@ message SegData {
   // Data for transcoding authentication
   AuthToken auth_token = 8;
 
-  // [EXPERIMENTAL]
-  // Detector enabled for this segment
-  bool detector_enabled = 9;
-
   // Calculate perceptual hash for this segment
   bool calc_perceptual_hash = 10;
 
@@ -215,9 +195,20 @@ message SegData {
   // Transcoding profiles to use. Supersedes `fullProfiles2` field
   repeated VideoProfile fullProfiles3 = 35;
 
-  // [EXPERIMENTAL]
-  // Detector profiles to use
-  repeated DetectorProfile detector_profiles = 36;
+  // Transcoding parameters specific to this segment
+  SegParameters segment_parameters = 37;
+
+  // Force HW Session Reinit
+  bool ForceSessionReinit = 38;
+}
+
+message SegParameters {
+  // Start timestamp from which to start encoding
+  // Milliseconds, from start of the file
+  uint64 from = 1;
+  // Skip all frames after that timestamp
+  // Milliseconds, from start of the file
+  uint64 to = 2;
 }
 
 message VideoProfile {
@@ -267,7 +258,17 @@ message VideoProfile {
   }
 
   // Encoder (video codec)
-  VideoCodec Encoder = 25;
+  VideoCodec encoder = 25;
+
+  int32 colorDepth = 26;
+
+  enum ChromaSubsampling {
+    CHROMA_420 = 0;
+    CHROMA_422 = 1;
+    CHROMA_444 = 2;
+  }
+  ChromaSubsampling chromaFormat = 27;
+  uint32 quality = 28;
 }
 
 // Individual transcoded segment data.
@@ -283,21 +284,6 @@ message TranscodedSegmentData {
     string perceptual_hash_url = 3;
 }
 
-// [EXPERIMENTAL]
-// Describes scene classification results
-message SceneClassificationData {
-  // Probability that the segment is detected as a particular classID (uint32)
-  map<uint32, double> class_probs = 1;
-}
-
-// [EXPERIMENTAL]
-// Describes detection results
-message DetectData {
-  oneof value {
-    SceneClassificationData scene_classification = 1;
-  }
-}
-
 // A set of transcoded segments following the profiles specified in the job.
 message TranscodeData {
 
@@ -306,10 +292,6 @@ message TranscodeData {
 
     // Signature of the hash of the concatenated hashes
     bytes sig = 2;
-
-    // [EXPERIMENTAL]
-    // Detection result data in same order as SegData.detector_profiles
-    repeated DetectData detections = 3;
 }
 
 // Response that a transcoder sends after transcoding a segment.

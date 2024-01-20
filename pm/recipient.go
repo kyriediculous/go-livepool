@@ -21,14 +21,17 @@ var errInsufficientSenderReserve = errors.New("insufficient sender reserve")
 // maxWinProb = 2^256 - 1
 var maxWinProb = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 
+// max number of sender nonces for a given recipient random hash
+var maxSenderNonces = 150
+
 var paramsExpirationBlock = big.NewInt(10)
 var paramsExpiryBuffer = int64(1)
 
 var evMultiplier = big.NewInt(100)
 
-// Hardcode to 200 gwei
+// Hardcode to 3 gwei
 // TODO: Replace this hardcoded value by dynamically determining the average gas price during a period of time
-var avgGasPrice = new(big.Int).Mul(big.NewInt(200), new(big.Int).Exp(big.NewInt(10), big.NewInt(9), nil))
+var avgGasPrice = new(big.Int).Mul(big.NewInt(3), new(big.Int).Exp(big.NewInt(10), big.NewInt(9), nil))
 
 // Recipient is an interface which describes an object capable
 // of receiving tickets
@@ -48,6 +51,9 @@ type Recipient interface {
 
 	// EV returns the recipients EV requirement for a ticket as configured on startup
 	EV() *big.Rat
+
+	//Set ticket faceValue upper limit
+	SetMaxFaceValue(maxfacevalue *big.Int)
 }
 
 // TicketParamsConfig contains config information for a recipient to determine
@@ -78,11 +84,12 @@ type recipient struct {
 	sm     SenderMonitor
 	tm     TimeManager
 
-	addr   ethcommon.Address
-	secret [32]byte
+	addr         ethcommon.Address
+	secret       [32]byte
+	maxfacevalue *big.Int
 
 	senderNonces map[string]*struct {
-		nonce           uint32
+		nonceSeen       map[uint32]bool
 		expirationBlock *big.Int
 	}
 	senderNoncesLock sync.Mutex
@@ -111,15 +118,16 @@ func NewRecipient(addr ethcommon.Address, broker Broker, val Validator, gpm GasP
 // automatically generate a random secret
 func NewRecipientWithSecret(addr ethcommon.Address, broker Broker, val Validator, gpm GasPriceMonitor, sm SenderMonitor, tm TimeManager, secret [32]byte, cfg TicketParamsConfig) Recipient {
 	return &recipient{
-		broker: broker,
-		val:    val,
-		gpm:    gpm,
-		sm:     sm,
-		tm:     tm,
-		addr:   addr,
-		secret: secret,
+		broker:       broker,
+		val:          val,
+		gpm:          gpm,
+		sm:           sm,
+		tm:           tm,
+		addr:         addr,
+		secret:       secret,
+		maxfacevalue: big.NewInt(0),
 		senderNonces: make(map[string]*struct {
-			nonce           uint32
+			nonceSeen       map[uint32]bool
 			expirationBlock *big.Int
 		}),
 		cfg:  cfg,
@@ -201,10 +209,7 @@ func (r *recipient) TicketParams(sender ethcommon.Address, price *big.Rat) (*Tic
 
 	winProb := r.winProb(faceValue)
 
-	ticketExpirationParams := &TicketExpirationParams{
-		CreationRound:          r.tm.LastInitializedRound().Int64(),
-		CreationRoundBlockHash: r.tm.LastInitializedL1BlockHash(),
-	}
+	ticketExpirationParams := r.ticketExpirationsParams()
 
 	recipientRand := r.rand(seed, sender, faceValue, winProb, expirationL1Block, price, ticketExpirationParams)
 	recipientRandHash := crypto.Keccak256Hash(ethcommon.LeftPadBytes(recipientRand.Bytes(), uint256Size))
@@ -219,6 +224,27 @@ func (r *recipient) TicketParams(sender ethcommon.Address, price *big.Rat) (*Tic
 		PricePerPixel:     price,
 		ExpirationParams:  ticketExpirationParams,
 	}, nil
+}
+
+func (r *recipient) ticketExpirationsParams() *TicketExpirationParams {
+	round := r.tm.LastInitializedRound().Int64()
+	roundBlockHash := r.tm.LastInitializedL1BlockHash()
+
+	// Because of a bug in Arbitrum, some L1 blocks have zero block hashes
+	// In that case, try to use the previous round block instead
+	if roundBlockHash == [32]byte{} {
+		round--
+		roundBlockHash = r.tm.PreLastInitializedL1BlockHash()
+	}
+
+	return &TicketExpirationParams{
+		CreationRound:          round,
+		CreationRoundBlockHash: roundBlockHash,
+	}
+}
+
+func (r *recipient) SetMaxFaceValue(maxfacevalue *big.Int) {
+	r.maxfacevalue = maxfacevalue
 }
 
 func (r *recipient) txCost() *big.Int {
@@ -256,6 +282,11 @@ func (r *recipient) faceValue(sender ethcommon.Address) (*big.Int, error) {
 		faceValue = maxFloat
 	}
 
+	if r.maxfacevalue.Cmp(big.NewInt(0)) > 0 {
+		if r.maxfacevalue.Cmp(faceValue) < 0 {
+			faceValue = r.maxfacevalue
+		}
+	}
 	if faceValue.Cmp(r.cfg.EV) < 0 {
 		return nil, errInsufficientSenderReserve
 	}
@@ -272,8 +303,7 @@ func (r *recipient) faceValue(sender ethcommon.Address) (*big.Int, error) {
 	// because there is a good chance that the current gasPrice will come back down by the time a winning ticket is received
 	// and needs to be redeemed.
 	// For now, avgGasPrice is hardcoded. See the comment for avgGasPrice for TODO information.
-	// Use || here for lazy evaluation. If the first clause is true we ignore the second clause.
-	if !(faceValue.Cmp(txCost) >= 0 || faceValue.Cmp(r.txCostWithGasPrice(avgGasPrice)) >= 0) {
+	if faceValue.Cmp(txCost) < 0 && faceValue.Cmp(r.txCostWithGasPrice(avgGasPrice)) < 0 {
 		return nil, errInsufficientSenderReserve
 	}
 
@@ -336,16 +366,24 @@ func (r *recipient) updateSenderNonce(rand *big.Int, ticket *Ticket) error {
 	defer r.senderNoncesLock.Unlock()
 
 	randStr := rand.String()
-	sn, ok := r.senderNonces[randStr]
-	if ok && ticket.SenderNonce <= sn.nonce {
-		return errors.Errorf("invalid ticket senderNonce sender=%v nonce=%v highest=%v", ticket.Sender.Hex(), ticket.SenderNonce, sn.nonce)
+	senderNonces, randKeySeen := r.senderNonces[randStr]
+	if randKeySeen {
+		_, isSeen := senderNonces.nonceSeen[ticket.SenderNonce]
+		if isSeen {
+			return errors.Errorf("invalid ticket senderNonce: already seen sender=%v nonce=%v", ticket.Sender.Hex(), ticket.SenderNonce)
+		}
+	} else {
+		r.senderNonces[randStr] = &struct {
+			nonceSeen       map[uint32]bool
+			expirationBlock *big.Int
+		}{make(map[uint32]bool), ticket.ParamsExpirationBlock}
 	}
-
-	r.senderNonces[randStr] = &struct {
-		nonce           uint32
-		expirationBlock *big.Int
-	}{ticket.SenderNonce, ticket.ParamsExpirationBlock}
-
+	// check nonce map size
+	if len(r.senderNonces[randStr].nonceSeen) >= maxSenderNonces {
+		return errors.Errorf("invalid ticket senderNonce: too many values sender=%v nonce=%v", ticket.Sender.Hex(), ticket.SenderNonce)
+	}
+	// add new nonce
+	r.senderNonces[randStr].nonceSeen[ticket.SenderNonce] = true
 	return nil
 }
 

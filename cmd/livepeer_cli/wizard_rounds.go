@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/big"
@@ -17,15 +16,19 @@ func (w *wizard) currentRound() (*big.Int, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(fmt.Sprintf("http response status %d", resp.StatusCode))
+		return nil, fmt.Errorf("http response status %d", resp.StatusCode)
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
+	cr, ok := new(big.Int).SetString(string(body), 10)
+	if !ok {
+		return nil, fmt.Errorf("could not parse current round from response")
+	}
 
-	return new(big.Int).SetBytes(body), nil
+	return cr, nil
 }
 
 func (w *wizard) initializeRound() {

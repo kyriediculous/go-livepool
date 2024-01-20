@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math"
@@ -42,7 +43,7 @@ func TestNewDBOrchestratorPoolCache_NilEthClient_ReturnsError(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{})
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{}, []string{})
 	assert.Nil(pool)
 	assert.EqualError(err, "could not create DBOrchestratorPoolCache: LivepeerEthClient is nil")
 }
@@ -72,11 +73,11 @@ func TestDeadLock(t *testing.T) {
 	uris := stringsToURIs(addresses)
 	assert := assert.New(t)
 	wg.Add(len(uris))
-	pool := NewOrchestratorPool(nil, uris, common.Score_Trusted)
+	pool := NewOrchestratorPool(nil, uris, common.Score_Trusted, []string{})
 	infos, err := pool.GetOrchestrators(context.TODO(), 1, newStubSuspender(), newStubCapabilities(), common.ScoreAtLeast(0))
 	assert.Nil(err, "Should not be error")
 	assert.Len(infos, 1, "Should return one orchestrator")
-	assert.Equal("transcoderfromtestserver", infos[0].Transcoder)
+	assert.Equal("transcoderfromtestserver", infos[0].RemoteInfo.Transcoder)
 }
 
 func TestDeadLock_NewOrchestratorPoolWithPred(t *testing.T) {
@@ -119,24 +120,24 @@ func TestDeadLock_NewOrchestratorPoolWithPred(t *testing.T) {
 	}
 
 	wg.Add(len(uris))
-	pool := NewOrchestratorPoolWithPred(nil, uris, pred, common.Score_Trusted)
+	pool := NewOrchestratorPoolWithPred(nil, uris, pred, common.Score_Trusted, []string{})
 	infos, err := pool.GetOrchestrators(context.TODO(), 1, newStubSuspender(), newStubCapabilities(), common.ScoreAtLeast(0))
 
 	assert.Nil(err, "Should not be error")
 	assert.Len(infos, 1, "Should return one orchestrator")
-	assert.Equal("transcoderfromtestserver", infos[0].Transcoder)
+	assert.Equal("transcoderfromtestserver", infos[0].RemoteInfo.Transcoder)
 }
 
 func TestPoolSize(t *testing.T) {
 	addresses := stringsToURIs([]string{"https://127.0.0.1:8936", "https://127.0.0.1:8937", "https://127.0.0.1:8938"})
 
 	assert := assert.New(t)
-	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted)
+	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted, []string{})
 	assert.Equal(3, pool.Size())
 
 	// will results in len(uris) <= 0 -> log Error
 	errorLogsBefore := glog.Stats.Error.Lines()
-	pool = NewOrchestratorPool(nil, nil, common.Score_Trusted)
+	pool = NewOrchestratorPool(nil, nil, common.Score_Trusted, []string{})
 	errorLogsAfter := glog.Stats.Error.Lines()
 	assert.Equal(0, pool.Size())
 	assert.NotZero(t, errorLogsAfter-errorLogsBefore)
@@ -151,7 +152,7 @@ func TestDBOrchestratorPoolCacheSize(t *testing.T) {
 	sender := &pm.MockSender{}
 	node := &core.LivepeerNode{
 		Database: dbh,
-		Eth:      &eth.StubClient{},
+		Eth:      &eth.StubClient{TotalStake: big.NewInt(0)},
 		Sender:   sender,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -162,7 +163,7 @@ func TestDBOrchestratorPoolCacheSize(t *testing.T) {
 		goleak.VerifyNone(t, common.IgnoreRoutines()...)
 	}()
 
-	emptyPool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{})
+	emptyPool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{}, []string{})
 	require.NoError(err)
 	require.NotNil(emptyPool)
 	assert.Equal(0, emptyPool.Size())
@@ -173,7 +174,7 @@ func TestDBOrchestratorPoolCacheSize(t *testing.T) {
 		dbh.UpdateOrch(ethOrchToDBOrch(o))
 	}
 
-	nonEmptyPool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{})
+	nonEmptyPool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{}, []string{})
 	require.NoError(err)
 	require.NotNil(nonEmptyPool)
 	assert.Equal(len(addresses), nonEmptyPool.Size())
@@ -210,14 +211,14 @@ func TestNewDBOrchestorPoolCache_NoEthAddress(t *testing.T) {
 
 	node := &core.LivepeerNode{
 		Database: dbh,
-		Eth:      &eth.StubClient{},
+		Eth:      &eth.StubClient{TotalStake: big.NewInt(0)},
 	}
 	// LastInitializedRound() will ensure the stub orch is always returned from the DB
 	rm := &stubRoundsManager{round: big.NewInt(100)}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, rm)
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, rm, []string{})
 	require.Nil(err)
 
 	// Check that serverGetOrchInfo returns early and the orchestrator isn't updated
@@ -264,14 +265,14 @@ func TestNewDBOrchestratorPoolCache_InvalidPrices(t *testing.T) {
 
 	node := &core.LivepeerNode{
 		Database: dbh,
-		Eth:      &eth.StubClient{},
+		Eth:      &eth.StubClient{TotalStake: big.NewInt(0)},
 	}
 	// LastInitializedRound() will ensure the stub orch is always returned from the DB
 	rm := &stubRoundsManager{round: big.NewInt(100)}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, rm)
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, rm, []string{})
 	require.Nil(err)
 
 	// priceInfo.PixelsPerUnit = 0
@@ -342,13 +343,13 @@ func TestNewDBOrchestratorPoolCache_GivenListOfOrchs_CreatesPoolCacheCorrectly(t
 
 	sender.On("ValidateTicketParams", mock.Anything).Return(nil).Times(3)
 
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{})
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{}, []string{})
 	require.NoError(err)
 	assert.Equal(pool.Size(), 3)
 	orchs, err := pool.GetOrchestrators(context.TODO(), pool.Size(), newStubSuspender(), newStubCapabilities(), common.ScoreAtLeast(0))
 	for _, o := range orchs {
-		assert.Equal(o.PriceInfo, expPriceInfo)
-		assert.Equal(o.Transcoder, expTranscoder)
+		assert.Equal(o.RemoteInfo.PriceInfo, expPriceInfo)
+		assert.Equal(o.RemoteInfo.Transcoder, expTranscoder)
 	}
 
 	// ensuring orchs exist in DB
@@ -412,7 +413,7 @@ func TestNewDBOrchestratorPoolCache_TestURLs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{})
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{}, []string{})
 	require.NoError(err)
 	// bad URLs are inserted in the database but are not included in the working set, as there is no returnable query for getting their priceInfo
 	// And if URL is updated it won't be picked up until next cache update
@@ -445,7 +446,7 @@ func TestNewDBOrchestratorPoolCache_TestURLs_Empty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{})
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{}, []string{})
 	require.NoError(err)
 	assert.Equal(0, pool.Size())
 	infos := pool.GetInfos()
@@ -530,7 +531,7 @@ func TestNewDBOrchestorPoolCache_PollOrchestratorInfo(t *testing.T) {
 	origCacheRefreshInterval := cacheRefreshInterval
 	cacheRefreshInterval = 200 * time.Millisecond
 	defer func() { cacheRefreshInterval = origCacheRefreshInterval }()
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{})
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{}, []string{})
 	require.NoError(err)
 
 	// Ensure orchestrators exist in DB
@@ -568,7 +569,7 @@ func TestNewOrchestratorPoolCache_GivenListOfOrchs_CreatesPoolCacheCorrectly(t *
 	assert := assert.New(t)
 
 	// creating NewOrchestratorPool with orch addresses
-	offchainOrch := NewOrchestratorPool(nil, addresses, common.Score_Trusted)
+	offchainOrch := NewOrchestratorPool(nil, addresses, common.Score_Trusted, []string{})
 
 	for i, info := range offchainOrch.infos {
 		assert.Equal(info.URL.String(), addresses[i].String())
@@ -594,7 +595,7 @@ func TestNewOrchestratorPoolWithPred_TestPredicate(t *testing.T) {
 	}
 	uris := stringsToURIs(addresses)
 
-	pool := NewOrchestratorPoolWithPred(nil, uris, pred, common.Score_Trusted)
+	pool := NewOrchestratorPoolWithPred(nil, uris, pred, common.Score_Trusted, []string{})
 
 	oInfo := &net.OrchestratorInfo{
 		PriceInfo: &net.PriceInfo{
@@ -684,7 +685,7 @@ func TestCachedPool_AllOrchestratorsTooExpensive_ReturnsEmptyList(t *testing.T) 
 
 	sender.On("ValidateTicketParams", mock.Anything).Return(nil)
 
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{})
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{}, []string{})
 	require.NoError(err)
 
 	// ensuring orchs exist in DB
@@ -773,7 +774,7 @@ func TestCachedPool_GetOrchestrators_MaxBroadcastPriceNotSet(t *testing.T) {
 
 	sender.On("ValidateTicketParams", mock.Anything).Return(nil)
 
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{})
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{}, []string{})
 	require.NoError(err)
 
 	// ensuring orchs exist in DB
@@ -795,8 +796,8 @@ func TestCachedPool_GetOrchestrators_MaxBroadcastPriceNotSet(t *testing.T) {
 	}
 	oinfos, err := pool.GetOrchestrators(context.TODO(), 50, newStubSuspender(), newStubCapabilities(), common.ScoreAtLeast(0))
 	for _, info := range oinfos {
-		assert.Equal(info.PriceInfo, expPriceInfo)
-		assert.Equal(info.Transcoder, expTranscoder)
+		assert.Equal(info.RemoteInfo.PriceInfo, expPriceInfo)
+		assert.Equal(info.RemoteInfo.Transcoder, expTranscoder)
 	}
 
 	assert.Nil(err, "Should not be error")
@@ -879,7 +880,7 @@ func TestCachedPool_N_OrchestratorsGoodPricing_ReturnsNOrchestrators(t *testing.
 
 	sender.On("ValidateTicketParams", mock.Anything).Return(nil)
 
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{})
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{}, []string{})
 	require.NoError(err)
 
 	// ensuring orchs exist in DB
@@ -912,15 +913,16 @@ func TestCachedPool_N_OrchestratorsGoodPricing_ReturnsNOrchestrators(t *testing.
 	assert.Nil(err, "Should not be error")
 	assert.Len(oinfos, 25)
 	for _, info := range oinfos {
-		assert.Equal(info.Transcoder, "goodPriceTranscoder")
+		assert.Equal(info.RemoteInfo.Transcoder, "goodPriceTranscoder")
 	}
 }
 
 func TestCachedPool_GetOrchestrators_TicketParamsValidation(t *testing.T) {
 	// Test setup
-
 	gmp := runtime.GOMAXPROCS(50)
 	defer runtime.GOMAXPROCS(gmp)
+	// Disable retrying discovery with extended timeout
+	maxGetOrchestratorCutoffTimeout = getOrchestratorsCutoffTimeout
 
 	server.BroadcastCfg.SetMaxPrice(nil)
 
@@ -963,7 +965,7 @@ func TestCachedPool_GetOrchestrators_TicketParamsValidation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{})
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{}, []string{})
 	require.NoError(err)
 
 	// Test 25 out of 50 orchs pass ticket params validation
@@ -1057,7 +1059,7 @@ func TestCachedPool_GetOrchestrators_OnlyActiveOrchestrators(t *testing.T) {
 
 	sender.On("ValidateTicketParams", mock.Anything).Return(nil)
 
-	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{round: big.NewInt(24)})
+	pool, err := NewDBOrchestratorPoolCache(ctx, node, &stubRoundsManager{round: big.NewInt(24)}, []string{})
 	require.NoError(err)
 
 	// ensuring orchs exist in DB
@@ -1070,22 +1072,21 @@ func TestCachedPool_GetOrchestrators_OnlyActiveOrchestrators(t *testing.T) {
 	}
 
 	// check size
-	// 25 active Os + 1 pending O
-	assert.Equal(26, pool.Size())
+	assert.Equal(25, pool.Size())
 
 	infos := pool.GetInfos()
-	assert.Len(infos, 26)
+	assert.Len(infos, 25)
 	for _, info := range infos {
-		assert.Contains(addresses[:26], info.URL.String())
+		assert.Contains(addresses[:25], info.URL.String())
 	}
 	oinfos, err := pool.GetOrchestrators(context.TODO(), 50, newStubSuspender(), newStubCapabilities(), common.ScoreAtLeast(0))
 	for _, info := range oinfos {
-		assert.Equal(info.PriceInfo, expPriceInfo)
-		assert.Equal(info.Transcoder, expTranscoder)
+		assert.Equal(info.RemoteInfo.PriceInfo, expPriceInfo)
+		assert.Equal(info.RemoteInfo.Transcoder, expTranscoder)
 	}
 
 	assert.Nil(err, "Should not be error")
-	assert.Len(infos, 26)
+	assert.Len(infos, 25)
 }
 
 func TestNewWHOrchestratorPoolCache(t *testing.T) {
@@ -1276,7 +1277,7 @@ func TestOrchestratorPool_GetOrchestrators(t *testing.T) {
 		}, err
 	}
 
-	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted)
+	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted, []string{})
 
 	// Check that we receive everything
 	wg.Add(len(addresses))
@@ -1341,7 +1342,7 @@ func TestOrchestratorPool_GetOrchestrators_SuspendedOrchs(t *testing.T) {
 		}, err
 	}
 
-	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted)
+	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted, []string{})
 
 	// suspend https://127.0.0.1:8938
 	sus := newStubSuspender()
@@ -1355,8 +1356,8 @@ func TestOrchestratorPool_GetOrchestrators_SuspendedOrchs(t *testing.T) {
 	res, err := pool.GetOrchestrators(context.TODO(), 2, sus, caps, common.ScoreAtLeast(0))
 	assert.Nil(err)
 	assert.Len(res, 2)
-	assert.NotEqual(res[0].GetTranscoder(), "https://127.0.0.1:8938")
-	assert.NotEqual(res[1].GetTranscoder(), "https://127.0.0.1:8938")
+	assert.NotEqual(res[0].RemoteInfo.GetTranscoder(), "https://127.0.0.1:8938")
+	assert.NotEqual(res[1].RemoteInfo.GetTranscoder(), "https://127.0.0.1:8938")
 
 	// include suspended O's if not enough non-suspended O's available
 	wg.Add(len(addresses))
@@ -1365,7 +1366,7 @@ func TestOrchestratorPool_GetOrchestrators_SuspendedOrchs(t *testing.T) {
 	assert.Nil(err)
 	assert.Len(res, 3)
 	// suspended Os are added last
-	assert.Equal(res[2].Transcoder, "https://127.0.0.1:8938")
+	assert.Equal(res[2].RemoteInfo.Transcoder, "https://127.0.0.1:8938")
 
 	// no suspended O's, insufficient non-suspended O's
 	sus = newStubSuspender()
@@ -1382,7 +1383,7 @@ func TestOrchestratorPool_GetOrchestrators_SuspendedOrchs(t *testing.T) {
 	assert.Nil(err)
 	assert.Len(res, 3)
 	// suspended Os are added last
-	assert.Equal(res[2].Transcoder, "https://127.0.0.1:8938")
+	assert.Equal(res[2].RemoteInfo.Transcoder, "https://127.0.0.1:8938")
 
 	// lower penalty is included before a higher penalty
 	wg.Add(len(addresses))
@@ -1392,8 +1393,8 @@ func TestOrchestratorPool_GetOrchestrators_SuspendedOrchs(t *testing.T) {
 	res, err = pool.GetOrchestrators(context.TODO(), 4, sus, caps, common.ScoreAtLeast(0))
 	assert.Nil(err)
 	assert.Len(res, 3)
-	assert.Equal(res[1].Transcoder, "https://127.0.0.1:8937")
-	assert.Equal(res[2].Transcoder, "https://127.0.0.1:8938")
+	assert.Equal(res[1].RemoteInfo.Transcoder, "https://127.0.0.1:8937")
+	assert.Equal(res[2].RemoteInfo.Transcoder, "https://127.0.0.1:8938")
 }
 
 func TestOrchestratorPool_ShuffleGetOrchestrators(t *testing.T) {
@@ -1410,7 +1411,7 @@ func TestOrchestratorPool_ShuffleGetOrchestrators(t *testing.T) {
 		return &net.OrchestratorInfo{Transcoder: server.String()}, nil
 	}
 
-	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted)
+	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted, []string{})
 
 	// Check that randomization happens: check for elements in a different order
 	// Could fail sometimes due to scheduling; the order of execution is undefined
@@ -1477,7 +1478,7 @@ func TestOrchestratorPool_GetOrchestratorTimeout(t *testing.T) {
 	getOrchestratorsTimeoutLoop = 1 * time.Millisecond
 	defer func() { getOrchestratorsTimeoutLoop = oldTimeout }()
 
-	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted)
+	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted, []string{})
 
 	timedOut := func(start, end time.Time) bool {
 		return end.Sub(start).Milliseconds() >= getOrchestratorsTimeoutLoop.Milliseconds()
@@ -1487,7 +1488,7 @@ func TestOrchestratorPool_GetOrchestratorTimeout(t *testing.T) {
 	// Use a waitgroup to ensure we drain all pending responses
 	// Keeps things pristine for follow-on tests
 	wg := sync.WaitGroup{}
-	getOrchestrators := func(nb int) ([]*net.OrchestratorInfo, error) {
+	getOrchestrators := func(nb int) (common.OrchestratorDescriptors, error) {
 		// requests go out to all Os in the pool, regardless of number requested
 		wg.Add(pool.Size())
 		return pool.GetOrchestrators(context.TODO(), nb, newStubSuspender(), newStubCapabilities(), common.ScoreAtLeast(0))
@@ -1565,10 +1566,14 @@ func TestOrchestratorPool_Capabilities(t *testing.T) {
 	i3 := &net.OrchestratorInfo{Capabilities: &net.Capabilities{Bitstring: []uint64{1}}}
 	// should succeed: compatible caps
 	i4 := &net.OrchestratorInfo{Capabilities: &net.Capabilities{Bitstring: capCompatString}}
+	// should be blacklisted
+	address, err := hex.DecodeString("40B28ee755260ae2735950Fe1BD0a64326ce58b0")
+	assert.NoError(err)
+	i5 := &net.OrchestratorInfo{Capabilities: &net.Capabilities{Bitstring: capCompatString}, Address: address}
 
-	responses := []*net.OrchestratorInfo{i1, i2, i3, i4}
-	addresses := stringsToURIs([]string{"a://b", "a://b", "a://b", "a://b"})
-	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted)
+	responses := []*net.OrchestratorInfo{i1, i2, i3, i4, i5}
+	addresses := stringsToURIs([]string{"a://b", "a://b", "a://b", "a://b", "a://b"})
+	pool := NewOrchestratorPool(nil, addresses, common.Score_Trusted, []string{hex.EncodeToString(address)})
 
 	// some sanity checks
 	assert.Len(addresses, len(responses))
@@ -1608,7 +1613,7 @@ func TestOrchestratorPool_Capabilities(t *testing.T) {
 	assert.True(caps.LegacyOnly()) // sanity check
 	infos, err = pool.GetOrchestrators(context.TODO(), len(responses), sus, caps, common.ScoreAtLeast(0))
 	assert.Nil(err)
-	assert.ElementsMatch(infos, []*net.OrchestratorInfo{i1, i4})
+	assert.ElementsMatch(infos.GetRemoteInfos(), []*net.OrchestratorInfo{i1, i4})
 
 	// non-legacy. only one should pass the filter
 	caps.isLegacy = false
@@ -1616,5 +1621,5 @@ func TestOrchestratorPool_Capabilities(t *testing.T) {
 	infos, err = pool.GetOrchestrators(context.TODO(), len(responses), sus, caps, common.ScoreAtLeast(0))
 	assert.Nil(err)
 	assert.Len(infos, 1)
-	assert.Equal(i4, infos[0])
+	assert.Equal(i4, infos[0].RemoteInfo)
 }

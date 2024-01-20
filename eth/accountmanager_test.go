@@ -2,9 +2,7 @@ package eth
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"math/big"
-	"os"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/accounts/keystore"
@@ -83,14 +81,13 @@ var jsonTypedData = `
 
 func TestAccountManager(t *testing.T) {
 	dir, ks := tmpKeyStore(t, true)
-	defer os.RemoveAll(dir)
 
 	a, err := ks.NewAccount("foo")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	am, err := NewAccountManager(a.Address, dir, big.NewInt(777))
+	am, err := NewAccountManager(a.Address, dir, big.NewInt(777), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,14 +111,13 @@ func TestAccountManager(t *testing.T) {
 
 func TestEmptyPassphrase(t *testing.T) {
 	dir, ks := tmpKeyStore(t, true)
-	defer os.RemoveAll(dir)
 
 	a, err := ks.NewAccount("")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	am, err := NewAccountManager(a.Address, dir, big.NewInt(777))
+	am, err := NewAccountManager(a.Address, dir, big.NewInt(777), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,12 +141,11 @@ func TestSign(t *testing.T) {
 	assert := assert.New(t)
 
 	dir, ks := tmpKeyStore(t, true)
-	defer os.RemoveAll(dir)
 
 	a, err := ks.NewAccount("")
 	require.Nil(err)
 
-	am, err := NewAccountManager(a.Address, dir, big.NewInt(777))
+	am, err := NewAccountManager(a.Address, dir, big.NewInt(777), "")
 	require.Nil(err)
 
 	_, err = am.Sign([]byte("foo"))
@@ -170,12 +165,11 @@ func TestSignTypedData(t *testing.T) {
 	assert := assert.New(t)
 
 	dir, ks := tmpKeyStore(t, true)
-	defer os.RemoveAll(dir)
 
 	a, err := ks.NewAccount("")
 	require.Nil(err)
 
-	am, err := NewAccountManager(a.Address, dir, big.NewInt(777))
+	am, err := NewAccountManager(a.Address, dir, big.NewInt(777), "")
 	require.Nil(err)
 
 	am.Unlock("")
@@ -192,10 +186,7 @@ func TestSignTypedData(t *testing.T) {
 }
 
 func tmpKeyStore(t *testing.T, encrypted bool) (string, *keystore.KeyStore) {
-	d, err := ioutil.TempDir("", "eth-keystore-test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := t.TempDir()
 
 	new := keystore.NewPlaintextKeyStore
 	if encrypted {

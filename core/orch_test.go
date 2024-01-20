@@ -22,7 +22,7 @@ import (
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/livepeer/go-livepeer/common"
-	"github.com/livepeer/go-livepeer/drivers"
+	"github.com/livepeer/go-tools/drivers"
 	"github.com/livepeer/lpms/ffmpeg"
 
 	"github.com/livepeer/go-livepeer/net"
@@ -404,31 +404,39 @@ func TestRemoveFromRemoteTranscoders(t *testing.T) {
 	remoteTranscoderList := []*RemoteTranscoder{}
 	assert := assert.New(t)
 
-	// Create 4 tanscoders
-	tr := make([]*RemoteTranscoder, 4)
-	for i := 0; i < 4; i++ {
+	// Create 6 transcoders
+	tr := make([]*RemoteTranscoder, 5)
+	for i := 0; i < 5; i++ {
 		tr[i] = &RemoteTranscoder{addr: "testAddress" + strconv.Itoa(i)}
 	}
 
 	// Add to list
 	remoteTranscoderList = append(remoteTranscoderList, tr...)
-	assert.Len(remoteTranscoderList, 4)
+	assert.Len(remoteTranscoderList, 5)
 
 	// Remove transcoder froms head of the list
 	remoteTranscoderList = removeFromRemoteTranscoders(tr[0], remoteTranscoderList)
 	assert.Equal(remoteTranscoderList[0], tr[1])
 	assert.Equal(remoteTranscoderList[1], tr[2])
 	assert.Equal(remoteTranscoderList[2], tr[3])
-	assert.Len(remoteTranscoderList, 3)
+	assert.Equal(remoteTranscoderList[3], tr[4])
+	assert.Len(remoteTranscoderList, 4)
 
 	// Remove transcoder from the middle of the list
 	remoteTranscoderList = removeFromRemoteTranscoders(tr[3], remoteTranscoderList)
 	assert.Equal(remoteTranscoderList[0], tr[1])
 	assert.Equal(remoteTranscoderList[1], tr[2])
+	assert.Equal(remoteTranscoderList[2], tr[4])
+	assert.Len(remoteTranscoderList, 3)
+
+	// Remove transcoder from the middle of the list
+	remoteTranscoderList = removeFromRemoteTranscoders(tr[2], remoteTranscoderList)
+	assert.Equal(remoteTranscoderList[0], tr[1])
+	assert.Equal(remoteTranscoderList[1], tr[4])
 	assert.Len(remoteTranscoderList, 2)
 
 	// Remove transcoder from the end of the list
-	remoteTranscoderList = removeFromRemoteTranscoders(tr[2], remoteTranscoderList)
+	remoteTranscoderList = removeFromRemoteTranscoders(tr[4], remoteTranscoderList)
 	assert.Equal(remoteTranscoderList[0], tr[1])
 	assert.Len(remoteTranscoderList, 1)
 
@@ -729,7 +737,7 @@ func TestProcessPayment_GivenRecipientError_ReturnsNil(t *testing.T) {
 	}
 	orch := NewOrchestrator(n, rm)
 	orch.address = addr
-	orch.node.SetBasePrice(big.NewRat(0, 1))
+	orch.node.SetBasePrice("default", big.NewRat(0, 1))
 	recipient.On("TxCostMultiplier", mock.Anything).Return(big.NewRat(1, 1), nil)
 
 	recipient.On("ReceiveTicket", mock.Anything, mock.Anything, mock.Anything).Return("", false, nil)
@@ -810,11 +818,11 @@ func TestProcessPayment_ActiveOrchestrator(t *testing.T) {
 	}
 	orch := NewOrchestrator(n, rm)
 	orch.address = addr
-	orch.node.SetBasePrice(big.NewRat(0, 1))
+	orch.node.SetBasePrice("default", big.NewRat(0, 1))
 
 	// orchestrator inactive -> error
 	err := orch.ProcessPayment(context.Background(), defaultPayment(t), ManifestID("some manifest"))
-	expErr := fmt.Sprintf("orchestrator %v is not eligible for payments in round %v, cannot process payments", addr.Hex(), 10)
+	expErr := fmt.Sprintf("orchestrator %v is inactive in round %v, cannot process payments", addr.Hex(), 10)
 	assert.EqualError(err, expErr)
 
 	// orchestrator is active -> no error
@@ -881,7 +889,7 @@ func TestProcessPayment_GivenLosingTicket_DoesNotRedeem(t *testing.T) {
 	}
 	orch := NewOrchestrator(n, rm)
 	orch.address = addr
-	orch.node.SetBasePrice(big.NewRat(0, 1))
+	orch.node.SetBasePrice("default", big.NewRat(0, 1))
 
 	recipient.On("TxCostMultiplier", mock.Anything).Return(big.NewRat(1, 1), nil)
 	recipient.On("ReceiveTicket", mock.Anything, mock.Anything, mock.Anything).Return("some sessionID", false, nil)
@@ -913,7 +921,7 @@ func TestProcessPayment_GivenWinningTicket_RedeemError(t *testing.T) {
 	}
 	orch := NewOrchestrator(n, rm)
 	orch.address = addr
-	orch.node.SetBasePrice(big.NewRat(0, 1))
+	orch.node.SetBasePrice("default", big.NewRat(0, 1))
 
 	manifestID := ManifestID("some manifest")
 	sessionID := "some sessionID"
@@ -953,7 +961,7 @@ func TestProcessPayment_GivenWinningTicket_Redeems(t *testing.T) {
 	}
 	orch := NewOrchestrator(n, rm)
 	orch.address = addr
-	orch.node.SetBasePrice(big.NewRat(0, 1))
+	orch.node.SetBasePrice("default", big.NewRat(0, 1))
 
 	manifestID := ManifestID("some manifest")
 	sessionID := "some sessionID"
@@ -993,7 +1001,7 @@ func TestProcessPayment_GivenMultipleWinningTickets_RedeemsAll(t *testing.T) {
 	}
 	orch := NewOrchestrator(n, rm)
 	orch.address = addr
-	orch.node.SetBasePrice(big.NewRat(0, 1))
+	orch.node.SetBasePrice("default", big.NewRat(0, 1))
 
 	manifestID := ManifestID("some manifest")
 	sessionID := "some sessionID"
@@ -1063,7 +1071,7 @@ func TestProcessPayment_GivenConcurrentWinningTickets_RedeemsAll(t *testing.T) {
 	}
 	orch := NewOrchestrator(n, rm)
 	orch.address = addr
-	orch.node.SetBasePrice(big.NewRat(0, 1))
+	orch.node.SetBasePrice("default", big.NewRat(0, 1))
 
 	manifestIDs := make([]string, 5)
 
@@ -1122,7 +1130,7 @@ func TestProcessPayment_GivenReceiveTicketError_ReturnsError(t *testing.T) {
 	}
 	orch := NewOrchestrator(n, rm)
 	orch.address = addr
-	orch.node.SetBasePrice(big.NewRat(0, 1))
+	orch.node.SetBasePrice("default", big.NewRat(0, 1))
 
 	manifestID := ManifestID("some manifest")
 
@@ -1190,7 +1198,7 @@ func TestProcessPayment_PaymentError_DoesNotIncreaseCreditBalance(t *testing.T) 
 	}
 	orch := NewOrchestrator(n, rm)
 	orch.address = addr
-	orch.node.SetBasePrice(big.NewRat(0, 1))
+	orch.node.SetBasePrice("default", big.NewRat(0, 1))
 
 	manifestID := ManifestID("some manifest")
 	paymentError := errors.New("ReceiveTicket error")
@@ -1205,43 +1213,30 @@ func TestProcessPayment_PaymentError_DoesNotIncreaseCreditBalance(t *testing.T) 
 	assert.Nil(orch.node.Balances.Balance(ethcommon.BytesToAddress(payment.Sender), manifestID))
 }
 
-func TestIsPaymentEligible(t *testing.T) {
+func TestIsActive(t *testing.T) {
 	assert := assert.New(t)
 	addr := defaultRecipient
 	dbh, dbraw := tempDBWithOrch(t, &common.DBOrch{
 		EthereumAddr:      addr.Hex(),
-		ActivationRound:   2,
+		ActivationRound:   1,
 		DeactivationRound: 999,
 	})
 	defer dbh.Close()
 	defer dbraw.Close()
 
-	// not active yet
 	n, _ := NewLivepeerNode(nil, "", dbh)
 	rm := &stubRoundsManager{
-		round: big.NewInt(0),
+		round: big.NewInt(10),
 	}
 	orch := NewOrchestrator(n, rm)
 
-	ok, err := orch.isPaymentEligible(addr)
-	assert.False(ok)
-	assert.NoError(err)
-
-	// pending activation
-	rm.round = big.NewInt(1)
-	ok, err = orch.isPaymentEligible(addr)
-	assert.True(ok)
-	assert.NoError(err)
-
-	// active
-	rm.round = big.NewInt(10)
-	ok, err = orch.isPaymentEligible(addr)
+	ok, err := orch.isActive(addr)
 	assert.True(ok)
 	assert.NoError(err)
 
 	// inactive
 	rm.round = big.NewInt(1000)
-	ok, err = orch.isPaymentEligible(addr)
+	ok, err = orch.isActive(addr)
 	assert.False(ok)
 	assert.NoError(err)
 }
@@ -1265,7 +1260,7 @@ func TestSufficientBalance_IsSufficient_ReturnsTrue(t *testing.T) {
 	}
 	orch := NewOrchestrator(n, rm)
 	orch.address = addr
-	orch.node.SetBasePrice(big.NewRat(0, 1))
+	orch.node.SetBasePrice("default", big.NewRat(0, 1))
 
 	manifestID := ManifestID("some manifest")
 
@@ -1303,7 +1298,7 @@ func TestSufficientBalance_IsNotSufficient_ReturnsFalse(t *testing.T) {
 	}
 	orch := NewOrchestrator(n, rm)
 	orch.address = addr
-	orch.node.SetBasePrice(big.NewRat(0, 1))
+	orch.node.SetBasePrice("default", big.NewRat(0, 1))
 
 	manifestID := ManifestID("some manifest")
 
@@ -1345,7 +1340,7 @@ func TestSufficientBalance_OffChainMode_ReturnsTrue(t *testing.T) {
 
 func TestTicketParams(t *testing.T) {
 	n, _ := NewLivepeerNode(nil, "", nil)
-	n.priceInfo = big.NewRat(1, 1)
+	n.priceInfo["default"] = big.NewRat(1, 1)
 	priceInfo := &net.PriceInfo{PricePerUnit: 1, PixelsPerUnit: 1}
 	recipient := new(pm.MockRecipient)
 	n.Recipient = recipient
@@ -1426,14 +1421,14 @@ func TestPriceInfo(t *testing.T) {
 	expPricePerPixel := big.NewRat(101, 100)
 
 	n, _ := NewLivepeerNode(nil, "", nil)
-	n.SetBasePrice(basePrice)
+	n.SetBasePrice("default", basePrice)
 
 	recipient := new(pm.MockRecipient)
 	n.Recipient = recipient
 	recipient.On("TxCostMultiplier", mock.Anything).Return(txMultiplier, nil)
 	orch := NewOrchestrator(n, nil)
 
-	priceInfo, err := orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err := orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(err)
 	assert.Zero(expPricePerPixel.Cmp(big.NewRat(priceInfo.PricePerUnit, priceInfo.PixelsPerUnit)))
 	fixedPrice, err := common.PriceToFixed(expPricePerPixel)
@@ -1444,11 +1439,11 @@ func TestPriceInfo(t *testing.T) {
 
 	// basePrice = 10/1, txMultiplier = 100/1 => expPricePerPixel = 1010/100
 	basePrice = big.NewRat(10, 1)
-	n.SetBasePrice(basePrice)
+	n.SetBasePrice("default", basePrice)
 	orch = NewOrchestrator(n, nil)
 	expPricePerPixel = big.NewRat(1010, 100)
 
-	priceInfo, err = orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err = orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(err)
 	assert.Zero(expPricePerPixel.Cmp(big.NewRat(priceInfo.PricePerUnit, priceInfo.PixelsPerUnit)))
 	fixedPrice, err = common.PriceToFixed(expPricePerPixel)
@@ -1459,11 +1454,11 @@ func TestPriceInfo(t *testing.T) {
 
 	// basePrice = 1/10, txMultiplier = 100 => expPricePerPixel = 101/1000
 	basePrice = big.NewRat(1, 10)
-	n.SetBasePrice(basePrice)
+	n.SetBasePrice("default", basePrice)
 	orch = NewOrchestrator(n, nil)
 	expPricePerPixel = big.NewRat(101, 1000)
 
-	priceInfo, err = orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err = orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(err)
 	assert.Zero(expPricePerPixel.Cmp(big.NewRat(priceInfo.PricePerUnit, priceInfo.PixelsPerUnit)))
 	fixedPrice, err = common.PriceToFixed(expPricePerPixel)
@@ -1473,11 +1468,11 @@ func TestPriceInfo(t *testing.T) {
 	assert.Equal(priceInfo.PixelsPerUnit, expPrice.Denom().Int64())
 	// basePrice = 25/10 , txMultiplier = 100 => expPricePerPixel = 2525/1000
 	basePrice = big.NewRat(25, 10)
-	n.SetBasePrice(basePrice)
+	n.SetBasePrice("default", basePrice)
 	orch = NewOrchestrator(n, nil)
 	expPricePerPixel = big.NewRat(2525, 1000)
 
-	priceInfo, err = orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err = orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(err)
 	assert.Zero(expPricePerPixel.Cmp(big.NewRat(priceInfo.PricePerUnit, priceInfo.PixelsPerUnit)))
 	fixedPrice, err = common.PriceToFixed(expPricePerPixel)
@@ -1489,14 +1484,14 @@ func TestPriceInfo(t *testing.T) {
 	// basePrice = 10/1 , txMultiplier = 100/10 => expPricePerPixel = 11
 	basePrice = big.NewRat(10, 1)
 	txMultiplier = big.NewRat(100, 10)
-	n.SetBasePrice(basePrice)
+	n.SetBasePrice("default", basePrice)
 	recipient = new(pm.MockRecipient)
 	n.Recipient = recipient
 	recipient.On("TxCostMultiplier", mock.Anything).Return(txMultiplier, nil)
 	orch = NewOrchestrator(n, nil)
 	expPricePerPixel = big.NewRat(11, 1)
 
-	priceInfo, err = orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err = orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(err)
 	assert.Zero(expPricePerPixel.Cmp(big.NewRat(priceInfo.PricePerUnit, priceInfo.PixelsPerUnit)))
 	fixedPrice, err = common.PriceToFixed(expPricePerPixel)
@@ -1508,14 +1503,14 @@ func TestPriceInfo(t *testing.T) {
 	// basePrice = 10/1 , txMultiplier = 1/10 => expPricePerPixel = 110
 	basePrice = big.NewRat(10, 1)
 	txMultiplier = big.NewRat(1, 10)
-	n.SetBasePrice(basePrice)
+	n.SetBasePrice("default", basePrice)
 	recipient = new(pm.MockRecipient)
 	n.Recipient = recipient
 	recipient.On("TxCostMultiplier", mock.Anything).Return(txMultiplier, nil)
 	orch = NewOrchestrator(n, nil)
 	expPricePerPixel = big.NewRat(1100, 10)
 
-	priceInfo, err = orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err = orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(err)
 	assert.Zero(expPricePerPixel.Cmp(big.NewRat(priceInfo.PricePerUnit, priceInfo.PixelsPerUnit)))
 	fixedPrice, err = common.PriceToFixed(expPricePerPixel)
@@ -1527,14 +1522,14 @@ func TestPriceInfo(t *testing.T) {
 	// basePrice = 10, txMultiplier = 1 => expPricePerPixel = 20
 	basePrice = big.NewRat(10, 1)
 	txMultiplier = big.NewRat(1, 1)
-	n.SetBasePrice(basePrice)
+	n.SetBasePrice("default", basePrice)
 	recipient = new(pm.MockRecipient)
 	n.Recipient = recipient
 	recipient.On("TxCostMultiplier", mock.Anything).Return(txMultiplier, nil)
 	orch = NewOrchestrator(n, nil)
 	expPricePerPixel = big.NewRat(20, 1)
 
-	priceInfo, err = orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err = orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(err)
 	assert.Zero(expPricePerPixel.Cmp(big.NewRat(priceInfo.PricePerUnit, priceInfo.PixelsPerUnit)))
 	fixedPrice, err = common.PriceToFixed(expPricePerPixel)
@@ -1544,17 +1539,17 @@ func TestPriceInfo(t *testing.T) {
 	assert.Equal(priceInfo.PixelsPerUnit, expPrice.Denom().Int64())
 
 	// basePrice = 0 => expPricePerPixel = 0
-	n.SetBasePrice(big.NewRat(0, 1))
+	n.SetBasePrice("default", big.NewRat(0, 1))
 	orch = NewOrchestrator(n, nil)
 
-	priceInfo, err = orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err = orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(err)
 	assert.Zero(priceInfo.PricePerUnit)
 	assert.Equal(int64(1), priceInfo.PixelsPerUnit)
 
 	// test no overflows
 	basePrice = big.NewRat(25000, 1)
-	n.SetBasePrice(basePrice)
+	n.SetBasePrice("default", basePrice)
 	faceValue, _ := new(big.Int).SetString("22245599237119512", 10)
 	txCost := new(big.Int).Mul(big.NewInt(100000), big.NewInt(7500000000))
 	txMultiplier = new(big.Rat).SetFrac(faceValue, txCost) // 926899968213313/31250000000000
@@ -1565,7 +1560,7 @@ func TestPriceInfo(t *testing.T) {
 	overhead := new(big.Rat).Add(big.NewRat(1, 1), new(big.Rat).Inv(txMultiplier))
 	expPricePerPixel = new(big.Rat).Mul(basePrice, overhead) // 23953749205332825000/926899968213313
 	require.Equal(expPricePerPixel.Num().Cmp(big.NewInt(int64(math.MaxInt64))), 1)
-	priceInfo, err = orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err = orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(err)
 	// for this case price will be rounded when converting to fixed
 	assert.NotEqual(expPricePerPixel.Cmp(big.NewRat(priceInfo.PricePerUnit, priceInfo.PixelsPerUnit)), 0)
@@ -1581,7 +1576,7 @@ func TestPriceInfo(t *testing.T) {
 
 	// Now make sure when AutoAdjustPrice = false we are returning the base price
 	n.AutoAdjustPrice = false
-	priceInfo, err = orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err = orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(err)
 	assert.Equal(basePrice, big.NewRat(priceInfo.PricePerUnit, priceInfo.PixelsPerUnit))
 }
@@ -1591,7 +1586,7 @@ func TestPriceInfo_GivenNilNode_ReturnsNilError(t *testing.T) {
 	orch := NewOrchestrator(n, nil)
 	orch.node = nil
 
-	priceInfo, err := orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err := orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(t, err)
 	assert.Nil(t, priceInfo)
 }
@@ -1601,7 +1596,7 @@ func TestPriceInfo_GivenNilRecipient_ReturnsNilError(t *testing.T) {
 	orch := NewOrchestrator(n, nil)
 	n.Recipient = nil
 
-	priceInfo, err := orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err := orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(t, err)
 	assert.Nil(t, priceInfo)
 }
@@ -1610,13 +1605,13 @@ func TestPriceInfo_TxMultiplierError_ReturnsError(t *testing.T) {
 	expError := errors.New("TxMultiplier Error")
 
 	n, _ := NewLivepeerNode(nil, "", nil)
-	n.SetBasePrice(big.NewRat(1, 1))
+	n.SetBasePrice("default", big.NewRat(1, 1))
 	recipient := new(pm.MockRecipient)
 	n.Recipient = recipient
 	recipient.On("TxCostMultiplier", mock.Anything).Return(nil, expError)
 	orch := NewOrchestrator(n, nil)
 
-	priceInfo, err := orch.PriceInfo(ethcommon.Address{})
+	priceInfo, err := orch.PriceInfo(ethcommon.Address{}, "")
 	assert.Nil(t, priceInfo)
 	assert.EqualError(t, err, expError.Error())
 }

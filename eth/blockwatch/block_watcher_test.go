@@ -41,9 +41,6 @@ func TestWatcher(t *testing.T) {
 	for i := 0; i < fakeClient.NumberOfTimesteps(); i++ {
 		scenarioLabel := fakeClient.GetScenarioLabel()
 
-		err := watcher.pollNextBlock()
-		require.NoError(t, err)
-
 		retainedBlocks, err := watcher.InspectRetainedBlocks()
 		require.NoError(t, err)
 		expectedRetainedBlocks := fakeClient.ExpectedRetainedBlocks()
@@ -189,12 +186,13 @@ func TestGetMissedEventsToBackfillSomeMissed(t *testing.T) {
 
 	store := &stubMiniHeaderStore{}
 	// Add block number 5 as the last block seen by BlockWatcher
-	lastBlockSeen := &MiniHeader{
+	preLastBlockSeen := &MiniHeader{
 		Number: big.NewInt(5),
 		Hash:   common.HexToHash("0x293b9ea024055a3e9eddbf9b9383dc7731744111894af6aa038594dc1b61f87f"),
 		Parent: common.HexToHash("0x26b13ac89500f7fcdd141b7d1b30f3a82178431eca325d1cf10998f9d68ff5ba"),
 	}
-	err = store.InsertMiniHeader(lastBlockSeen)
+	err = store.InsertMiniHeader(preLastBlockSeen)
+
 	require.NoError(t, err)
 
 	config.Store = store
@@ -203,9 +201,9 @@ func TestGetMissedEventsToBackfillSomeMissed(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	events, err := watcher.getMissedEventsToBackfill(ctx)
+	events, err := watcher.getMissedEventsToBackfill(ctx, nil)
 	require.NoError(t, err)
-	assert.Len(t, events, 1)
+	assert.Len(t, events, 2)
 
 	// Check that block 30 is now in the DB, and block 5 was removed.
 	headers, err := store.FindAllMiniHeadersSortedByNumber()
@@ -235,7 +233,7 @@ func TestGetMissedEventsToBackfillNoneMissed(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	events, err := watcher.getMissedEventsToBackfill(ctx)
+	events, err := watcher.getMissedEventsToBackfill(ctx, nil)
 	require.NoError(t, err)
 	assert.Len(t, events, 0)
 
@@ -261,13 +259,13 @@ func TestGetMissedEventsToBackfill_NOOP(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	events, err := watcher.getMissedEventsToBackfill(ctx)
+	events, err := watcher.getMissedEventsToBackfill(ctx, nil)
 	require.NoError(t, err)
-	assert.Len(t, events, 0)
+	assert.Len(t, events, 1)
 
 	headers, err := store.FindAllMiniHeadersSortedByNumber()
 	require.NoError(t, err)
-	require.Len(t, headers, 0)
+	require.Len(t, headers, 1)
 }
 
 var logStub = types.Log{
@@ -527,6 +525,7 @@ func TestEnrichWithL1_One(t *testing.T) {
 	header := &MiniHeader{
 		Number: big.NewInt(FakeBlockNumber),
 		Hash:   common.HexToHash(FakeHash),
+		Logs:   []types.Log{logStub},
 	}
 	events := []*Event{{BlockHeader: header}}
 
@@ -536,6 +535,7 @@ func TestEnrichWithL1_One(t *testing.T) {
 	assert.Equal(common.HexToHash(FakeHash), res[0].BlockHeader.Hash)
 	assert.Equal(big.NewInt(FakeBlockNumber), res[0].BlockHeader.Number)
 	assert.Equal(big.NewInt(FakeL1BlockNumber), res[0].BlockHeader.L1BlockNumber)
+	assert.Contains(res[0].BlockHeader.Logs, logStub)
 }
 
 func TestEnrichWithL1_Multiple(t *testing.T) {

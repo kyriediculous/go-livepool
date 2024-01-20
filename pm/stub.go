@@ -273,6 +273,7 @@ func (s *stubSigner) Account() accounts.Account {
 type stubTimeManager struct {
 	round              *big.Int
 	blkHash            [32]byte
+	preBlkHash         [32]byte
 	transcoderPoolSize *big.Int
 	lastSeenBlock      *big.Int
 
@@ -289,6 +290,10 @@ func (m *stubTimeManager) LastInitializedRound() *big.Int {
 
 func (m *stubTimeManager) LastInitializedL1BlockHash() [32]byte {
 	return m.blkHash
+}
+
+func (m *stubTimeManager) PreLastInitializedL1BlockHash() [32]byte {
+	return m.preBlkHash
 }
 
 func (m *stubTimeManager) GetTranscoderPoolSize() *big.Int {
@@ -487,6 +492,11 @@ func (m *MockRecipient) TxCostMultiplier(sender ethcommon.Address) (*big.Rat, er
 func (m *MockRecipient) EV() *big.Rat {
 	args := m.Called()
 	return args.Get(0).(*big.Rat)
+}
+
+// Sets the max ticket facevalue for the orchestrator
+func (m *MockRecipient) SetMaxFaceValue(maxfacevalue *big.Int) {
+
 }
 
 // MockSender is useful for testing components that depend on pm.Sender

@@ -112,20 +112,6 @@ var schema = `
 	-- Index to only retrieve unbonding locks that have not been used
 	CREATE INDEX IF NOT EXISTS idx_unbondinglocks_usedblock ON unbondingLocks(usedBlock);
 
-	CREATE TABLE IF NOT EXISTS winningTickets (
-		createdAt STRING DEFAULT CURRENT_TIMESTAMP,
-		sender STRING,
-		recipient STRING,
-		faceValue BLOB,
-		winProb BLOB,
-		senderNonce INTEGER,
-		recipientRand BLOB,
-		recipientRandHash STRING,
-		sig BLOB,
-		sessionID STRING
-	);
-	CREATE INDEX IF NOT EXISTS idx_winningtickets_sessionid ON winningTickets(sessionID);
-
 	CREATE TABLE IF NOT EXISTS ticketQueue (
 		createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
 		sender STRING,
@@ -257,30 +243,30 @@ func InitDB(dbPath string) (*DB, error) {
 
 	// updateOrch prepared statement
 	stmt, err = db.Prepare(`
-	INSERT INTO orchestrators(updatedAt, ethereumAddr, serviceURI, pricePerPixel, activationRound, deactivationRound, stake, createdAt) 
-	VALUES(datetime(), :ethereumAddr, :serviceURI, :pricePerPixel, :activationRound, :deactivationRound, :stake, datetime()) 
-	ON CONFLICT(ethereumAddr) DO UPDATE SET 
+	INSERT INTO orchestrators(updatedAt, ethereumAddr, serviceURI, pricePerPixel, activationRound, deactivationRound, stake, createdAt)
+	VALUES(datetime(), :ethereumAddr, :serviceURI, :pricePerPixel, :activationRound, :deactivationRound, :stake, datetime())
+	ON CONFLICT(ethereumAddr) DO UPDATE SET
 	updatedAt = excluded.updatedAt,
 	serviceURI =
-  		CASE WHEN trim(excluded.serviceURI) == ""
-  		THEN orchestrators.serviceURI
-		ELSE trim(excluded.serviceURI) END, 
-	pricePerPixel = 
+		CASE WHEN trim(excluded.serviceURI) == ""
+		THEN orchestrators.serviceURI
+		ELSE trim(excluded.serviceURI) END,
+	pricePerPixel =
 		CASE WHEN excluded.pricePerPixel == 0
 		THEN orchestrators.pricePerPixel
-		ELSE excluded.pricePerPixel END, 
-	activationRound = 
+		ELSE excluded.pricePerPixel END,
+	activationRound =
 		CASE WHEN excluded.activationRound == 0
 		THEN orchestrators.activationRound
-		ELSE excluded.activationRound END, 
-	deactivationRound = 
+		ELSE excluded.activationRound END,
+	deactivationRound =
 		CASE WHEN excluded.deactivationRound == 0
 		THEN orchestrators.deactivationRound
 		ELSE excluded.deactivationRound END,
-	stake = 
+	stake =
 		CASE WHEN excluded.stake == 0
 		THEN orchestrators.stake
-		ELSE excluded.stake END 
+		ELSE excluded.stake END
 	`)
 	if err != nil {
 		glog.Error("Unable to prepare updateOrch ", err)
@@ -633,14 +619,17 @@ func (db *DB) OrchCount(filter *DBOrchFilter) (int, error) {
 func (db *DB) IsOrchActive(addr ethcommon.Address, round *big.Int) (bool, error) {
 	orchs, err := db.SelectOrchs(
 		&DBOrchFilter{
-			CurrentRound: round,
-			Addresses:    []ethcommon.Address{addr},
+			Addresses: []ethcommon.Address{addr},
 		},
 	)
 	if err != nil {
 		return false, err
 	}
-	return len(orchs) > 0, nil
+	if len(orchs) == 0 {
+		return false, errors.New("Orchestrator not found")
+	}
+	isActive := orchs[0].ActivationRound <= round.Int64() && round.Int64() < orchs[0].DeactivationRound
+	return isActive, nil
 }
 
 func (db *DB) InsertUnbondingLock(id *big.Int, delegator ethcommon.Address, amount, withdrawRound *big.Int) error {

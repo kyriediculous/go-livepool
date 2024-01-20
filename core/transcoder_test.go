@@ -19,8 +19,7 @@ func stubMetadata(sess string, profile ...ffmpeg.VideoProfile) *SegTranscodingMe
 }
 
 func TestLocalTranscoder(t *testing.T) {
-	tmp, _ := ioutil.TempDir("", "")
-	defer os.RemoveAll(tmp)
+	tmp := t.TempDir()
 	tc := NewLocalTranscoder(tmp)
 	ffmpeg.InitFFmpeg()
 
@@ -47,9 +46,7 @@ func TestNvidia_Transcoder(t *testing.T) {
 		return
 	}
 
-	tmp, _ := ioutil.TempDir("", "")
-	defer os.RemoveAll(tmp)
-	WorkDir = tmp
+	WorkDir = t.TempDir()
 	defer func() { WorkDir = "" }()
 	// test.ts sample isn't in a supported pixel format, so use this instead
 	fname := "test2.ts"
@@ -102,9 +99,7 @@ func TestResToTranscodeData(t *testing.T) {
 
 	// Test error after a successful read
 	res = &ffmpeg.TranscodeResults{Encoded: make([]ffmpeg.MediaInfo, 3)}
-	tempDir, err := ioutil.TempDir("", "TestResToTranscodeData")
-	require.Nil(err)
-	defer os.Remove(tempDir)
+	tempDir := t.TempDir()
 
 	file1, err := ioutil.TempFile(tempDir, "foo")
 	require.Nil(err)
@@ -185,12 +180,12 @@ func TestProfilesToTranscodeOptions(t *testing.T) {
 
 	// Test 0 profiles
 	profiles := []ffmpeg.VideoProfile{}
-	opts := profilesToTranscodeOptions(workDir, ffmpeg.Software, profiles, false)
+	opts := profilesToTranscodeOptions(workDir, ffmpeg.Software, profiles, false, nil)
 	assert.Equal(0, len(opts))
 
 	// Test 1 profile
 	profiles = []ffmpeg.VideoProfile{ffmpeg.P144p30fps16x9}
-	opts = profilesToTranscodeOptions(workDir, ffmpeg.Software, profiles, false)
+	opts = profilesToTranscodeOptions(workDir, ffmpeg.Software, profiles, false, nil)
 	assert.Equal(1, len(opts))
 	assert.Equal("foo/out_bar.tempfile", opts[0].Oname)
 	assert.Equal(ffmpeg.Software, opts[0].Accel)
@@ -199,7 +194,7 @@ func TestProfilesToTranscodeOptions(t *testing.T) {
 
 	// Test > 1 profile
 	profiles = []ffmpeg.VideoProfile{ffmpeg.P144p30fps16x9, ffmpeg.P240p30fps16x9}
-	opts = profilesToTranscodeOptions(workDir, ffmpeg.Software, profiles, false)
+	opts = profilesToTranscodeOptions(workDir, ffmpeg.Software, profiles, false, nil)
 	assert.Equal(2, len(opts))
 
 	for i, p := range profiles {
@@ -210,11 +205,11 @@ func TestProfilesToTranscodeOptions(t *testing.T) {
 	}
 
 	// Test different acceleration value
-	opts = profilesToTranscodeOptions(workDir, ffmpeg.Nvidia, profiles, false)
+	opts = profilesToTranscodeOptions(workDir, ffmpeg.Nvidia, profiles, false, nil)
 	assert.Equal(2, len(opts))
 
 	// Test signature calculation
-	opts = profilesToTranscodeOptions(workDir, ffmpeg.Nvidia, profiles, true)
+	opts = profilesToTranscodeOptions(workDir, ffmpeg.Nvidia, profiles, true, nil)
 	assert.True(opts[0].CalcSign)
 	assert.True(opts[1].CalcSign)
 
@@ -228,8 +223,7 @@ func TestProfilesToTranscodeOptions(t *testing.T) {
 
 func TestAudioCopy(t *testing.T) {
 	assert := assert.New(t)
-	dir, _ := ioutil.TempDir("", "")
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	tc := NewLocalTranscoder(dir)
 	ffmpeg.InitFFmpeg()
 
@@ -248,19 +242,14 @@ func TestAudioCopy(t *testing.T) {
 
 	md := stubMetadata("", videoProfiles...)
 	md.Fname = audioSample
-	res, err := tc.Transcode(context.TODO(), md)
-	assert.Nil(err)
-
-	o, err := ioutil.ReadFile(audioSample)
-	assert.Nil(err)
-	assert.Equal(o, res.Segments[0].Data)
+	_, err = tc.Transcode(context.TODO(), md)
+	assert.Equal(ffmpeg.ErrTranscoderVid, err)
 }
 
 func TestTranscoder_Formats(t *testing.T) {
 	// Helps ensure the necessary ffmpeg configure options are enabled
 	assert := assert.New(t)
-	dir, _ := ioutil.TempDir("", "")
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	in := &ffmpeg.TranscodeOptionsIn{Fname: "test.ts"}
 	for k, v := range ffmpeg.ExtensionFormats {

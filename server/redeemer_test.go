@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/big"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -52,18 +50,15 @@ func TestRedeemerServer_NewRedeemer(t *testing.T) {
 }
 
 func TestRedeemerServer_Start(t *testing.T) {
-	assert := assert.New(t)
 	require := require.New(t)
 
 	r, err := NewRedeemer(ethcommon.BytesToAddress([]byte("foo")), &eth.StubClient{}, &pm.LocalSenderMonitor{})
 	require.Nil(err)
 
-	url, err := url.ParseRequestURI("https://127.0.0.1:8935")
-	require.Nil(err)
+	url, err := url.ParseRequestURI("https://127.0.0.1:8990")
+	require.NoError(err)
 
-	tmpdir, err := ioutil.TempDir("", "")
-	require.Nil(err)
-	defer os.Remove(tmpdir)
+	tmpdir := t.TempDir()
 
 	errCh := make(chan error)
 	go func() {
@@ -74,10 +69,10 @@ func TestRedeemerServer_Start(t *testing.T) {
 
 	// Check that client can connect to server
 	_, err = NewRedeemerClient(url.Host, newStubSenderManager(), &stubTimeManager{})
-	assert.Nil(err)
+	require.NoError(err)
 
 	r.Stop()
-	assert.Nil(<-errCh)
+	require.NoError(<-errCh)
 }
 
 func TestRedeemerServer_QueueTicket(t *testing.T) {
@@ -851,6 +846,7 @@ func (s *stubSenderManager) Clear(addr ethcommon.Address) {
 type stubTimeManager struct {
 	round              *big.Int
 	blkHash            [32]byte
+	preBlkHash         [32]byte
 	transcoderPoolSize *big.Int
 	lastSeenBlock      *big.Int
 
@@ -864,6 +860,10 @@ func (m *stubTimeManager) LastInitializedRound() *big.Int {
 
 func (m *stubTimeManager) LastInitializedL1BlockHash() [32]byte {
 	return m.blkHash
+}
+
+func (m *stubTimeManager) PreLastInitializedL1BlockHash() [32]byte {
+	return m.preBlkHash
 }
 
 func (m *stubTimeManager) GetTranscoderPoolSize() *big.Int {

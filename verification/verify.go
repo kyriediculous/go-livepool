@@ -15,8 +15,8 @@ import (
 	"github.com/livepeer/go-livepeer/common"
 	"github.com/livepeer/go-livepeer/core"
 	lpcrypto "github.com/livepeer/go-livepeer/crypto"
-	"github.com/livepeer/go-livepeer/drivers"
 	"github.com/livepeer/go-livepeer/net"
+	"github.com/livepeer/go-tools/drivers"
 
 	"github.com/livepeer/lpms/ffmpeg"
 	"github.com/livepeer/lpms/stream"
@@ -184,7 +184,7 @@ func IsRetryable(err error) bool {
 }
 
 func (sv *SegmentVerifier) sigVerification(params *Params) error {
-	if params.Orchestrator == nil || params.Orchestrator.TicketParams == nil {
+	if params.Orchestrator == nil || params.Orchestrator.Address == nil || params.Orchestrator.TicketParams == nil {
 		return nil
 	}
 

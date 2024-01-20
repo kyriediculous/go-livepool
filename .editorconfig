@@ -1,0 +1,35 @@
+# This file is the top-most EditorConfig file
+root = true
+
+# All Files
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+end_of_line = lf
+
+# Ignored files
+[*.{ts,phash}]
+charset = unset
+indent_style = unset
+indent_size = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+end_of_line = unset
+
+[{VERSION,LICENSE,*.txt}]
+insert_final_newline = unset
+
+# Makefiles/Dockerfile/golang files
+[{Makefile,Dockerfile{,.debian},*.go}]
+indent_style = tab
+indent_size = 8
+
+# YAML/JSON Files
+[{.ecrc,*.{yml,yaml,sh,json}}]
+indent_size = 2
+
+[{server/handlers_test,eth/accountmanager_test}.go]
+indent_style = unset

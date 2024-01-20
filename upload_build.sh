@@ -5,15 +5,19 @@
 set -e
 set -o nounset
 
-if [[ $(uname) == *"MSYS"* ]]; then
-  ARCH="windows"
-  EXT=".exe"
+BASE_DIR="$(realpath $(dirname "$0"))"
+
+cd "$BASE_DIR"
+RELEASES_DIR="${BASE_DIR}/${RELEASES_DIR:-releases}/"
+
+mkdir -p "$RELEASES_DIR"
+
+if [[ "${GOOS:-}" != "" ]]; then
+  PLATFORM="$GOOS"
+elif [[ $(uname) == *"MSYS"* ]]; then
+  PLATFORM="windows"
 else
-  ARCH=$(uname | tr '[:upper:]' '[:lower:]')
-  EXT=""
-  if [[ -n "${RELEASE_TAG:-}" ]]; then
-      ARCH="$ARCH-$RELEASE_TAG"
-  fi
+  PLATFORM=$(uname | tr '[:upper:]' '[:lower:]')
 fi
 
 BASE="livepool-$ARCH-amd64"
@@ -54,15 +58,15 @@ mkdir $BASE
 cp $POOL $BASE
 
 # do a basic upload so we know if stuff's working prior to doing everything else
-if [[ $ARCH == "windows" ]]; then
-  FILE=$BASE.zip
-  zip -r ./$FILE ./$BASE
+if [[ $PLATFORM == "windows" ]]; then
+  FILE="$BASE.zip"
+  zip -r "${RELEASES_DIR}/$FILE" ./$BASE
 else
-  FILE=$BASE.tar.gz
-  tar -czvf ./$FILE ./$BASE
+  FILE="$BASE.tar.gz"
+  tar -czvf "${RELEASES_DIR}/$FILE" ./$BASE
 fi
 
-FILE_SHA256=`shasum -a 256 ${FILE}`
+cd "$RELEASES_DIR"
 
 # Quick self-check to see if the thing can execute at all
 (cd $BASE && $POOL -version)
@@ -76,9 +80,9 @@ fi
 bucket=build.livepool.io
 resource="/${bucket}/${VERSION_AND_NETWORK}/${FILE}"
 contentType="application/x-compressed-tar"
-dateValue=`date -R`
+dateValue="$(date -R)"
 stringToSign="PUT\n\n${contentType}\n${dateValue}\n${resource}"
-signature=`echo -en ${stringToSign} | openssl sha1 -hmac ${GCLOUD_SECRET} -binary | base64`
+signature="$(echo -en ${stringToSign} | openssl sha1 -hmac ${GCLOUD_SECRET} -binary | base64)"
 fullUrl="https://storage.googleapis.com${resource}"
 
 # Failsafe - don't overwrite existing uploads!

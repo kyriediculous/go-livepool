@@ -45,20 +45,7 @@ Note that step 3 and on do not need to be executed after every single PR merge i
 
 ### Release flow
 
-Once all planned code updates are merged into `master`, we use the release candidate binaries built by CI for internal testing on mainnet. During this stage, we
-
-1. Roll out the binaries to internal mainnet infrastructure
-2. Check that user facing bugs described in closed bug reports cannot be reproduced
-3. Check that user facing features are working as expected
-4. Run stream tests that involve sending/monitoring streams sent into broadcasters that are then routed to one or many orchestrators
-
-The goals of this stage are:
-
-1. Test the release candidate on internal infrastructure that can be easily monitored
-2. Make sure that code updates did not introduce any obvious regressions
-3. Perform manual QA for user facing changes
-
-Once we complete this stage, we prepare a mainnet release.
+Double-check that `master` is deployed to staging and that it works correctly.
 
 ### Cutting a mainnet release of go-livepeer
 
@@ -82,10 +69,17 @@ Create the release commit on a branch:
 
 5. `git push -u origin release-0.5.2`
 
-Merge the release commit into `master` via PR. Then, push the release tag up.
+6. Merge the release commit into `master` via PR. Then, push the release tag up.
 
 ```bash
 git checkout master
+git pull
+git log # Confirm that no new changes came into master while you were doing the previous steps
 git tag v0.5.2
 git push origin v0.5.2
 ```
+
+7. Once the CI (Github Actions) process completes, you should see your release at https://github.com/livepeer/go-livepeer/releases. Fix up the release notes to be more human-friendly, using previous releases as a guide.
+
+8. Update commit hash, version and checksum for Homebrew as per https://github.com/livepeer/homebrew-tap/pull/5
+9. Announce the release on Discord in #network-announcements

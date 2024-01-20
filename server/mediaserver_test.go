@@ -25,22 +25,19 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/livepeer/go-livepeer/core"
-	"github.com/livepeer/go-livepeer/drivers"
 	"github.com/livepeer/go-livepeer/net"
+	"github.com/livepeer/go-tools/drivers"
 	lpmscore "github.com/livepeer/lpms/core"
 	ffmpeg "github.com/livepeer/lpms/ffmpeg"
 	"github.com/livepeer/lpms/segmenter"
 	"github.com/livepeer/lpms/stream"
+	"go.uber.org/goleak"
 )
 
 // var S *LivepeerServer
 
 var pushResetWg sync.WaitGroup // needed to synchronize exits from HTTP push
 
-// func setupServer() *LivepeerServer {
-// 	s, _ := setupServerWithCancel()
-// 	return s
-// }
 var port = 10000
 
 // waitForTCP tries to establish TCP connection for a specified time
@@ -102,7 +99,8 @@ func setupServerWithCancel() (*LivepeerServer, context.CancelFunc) {
 		// port++
 		// this one really starts server (without a way to shut it down)
 		cliUrl := fmt.Sprintf("127.0.0.1:%d", port)
-		go S.StartCliWebserver(cliUrl)
+		srv := &http.Server{Addr: cliUrl}
+		go S.StartCliWebserver(srv)
 		port++
 		// sometimes LivepeerServer needs time  to start
 		// esp if this is the only test in the suite being run (eg, via `-run)
@@ -134,7 +132,10 @@ func setupServerWithCancelAndPorts() (*LivepeerServer, context.CancelFunc) {
 		n, _ := core.NewLivepeerNode(nil, "./tmp", nil)
 		S, _ = NewLivepeerServer("127.0.0.1:2938", n, true, "")
 		go S.StartMediaServer(ctx, "127.0.0.1:9080")
-		go S.StartCliWebserver("127.0.0.1:9938")
+		go func() {
+			srv := &http.Server{Addr: "127.0.0.1:9938"}
+			S.StartCliWebserver(srv)
+		}()
 	}
 	return S, cancel
 }
@@ -170,13 +171,8 @@ func (d *stubDiscovery) GetInfos() []common.OrchestratorLocalInfo {
 	return nil
 }
 
-func (d *stubDiscovery) GetInfo(uri string) common.OrchestratorLocalInfo {
-	var res common.OrchestratorLocalInfo
-	return res
-}
-
 func (d *stubDiscovery) GetOrchestrators(ctx context.Context, num int, sus common.Suspender, caps common.CapabilityComparator,
-	scorePred common.ScorePred) ([]*net.OrchestratorInfo, error) {
+	scorePred common.ScorePred) (common.OrchestratorDescriptors, error) {
 
 	if d.waitGetOrch != nil {
 		<-d.waitGetOrch
@@ -188,7 +184,7 @@ func (d *stubDiscovery) GetOrchestrators(ctx context.Context, num int, sus commo
 		err = d.getOrchError
 		d.lock.Unlock()
 	}
-	return d.infos, err
+	return common.FromRemoteInfos(d.infos), err
 }
 
 func (d *stubDiscovery) Size() int {
@@ -437,7 +433,7 @@ func TestCreateRTMPStreamHandlerCap(t *testing.T) {
 		connectionLock:  &sync.RWMutex{},
 		rtmpConnections: make(map[core.ManifestID]*rtmpConnection),
 	}
-	createSid := createRTMPStreamIDHandler(context.TODO(), s)
+	createSid := createRTMPStreamIDHandler(context.TODO(), s, nil)
 	u := mustParseUrl(t, "http://hot/id1/secret")
 	oldMaxSessions := core.MaxSessions
 	core.MaxSessions = 1
@@ -469,7 +465,7 @@ func TestCreateRTMPStreamHandlerWebhook(t *testing.T) {
 	defer serverCleanup(s)
 	defer cancel()
 	s.RTMPSegmenter = &StubSegmenter{skip: true}
-	createSid := createRTMPStreamIDHandler(context.TODO(), s)
+	createSid := createRTMPStreamIDHandler(context.TODO(), s, nil)
 
 	AuthWebhookURL = mustParseUrl(t, "http://localhost:8938/notexisting")
 	u := mustParseUrl(t, "http://hot/something/id1")
@@ -663,34 +659,13 @@ func TestCreateRTMPStreamHandlerWebhook(t *testing.T) {
 	assert.NotNil(params.OS)
 	assert.True(params.OS.IsExternal())
 	osinfo := params.OS.GetInfo()
-	assert.Equal(net.OSInfo_S3, osinfo.GetStorageType())
-	assert.Equal("http://object.store/path", osinfo.GetS3Info().Host)
+	assert.Equal(int32(net.OSInfo_S3), int32(osinfo.StorageType))
+	assert.Equal("http://object.store/path", osinfo.S3Info.Host)
 	assert.NotNil(params.RecordOS)
 	assert.True(params.RecordOS.IsExternal())
 	osinfo = params.RecordOS.GetInfo()
-	assert.Equal(net.OSInfo_S3, osinfo.GetStorageType())
-	assert.Equal("http://record.store", osinfo.GetS3Info().Host)
-
-	// set scene classification detector profiles
-	ts18 := makeServer(`{"manifestID":"a", "detection": {"freq": 5, "sampleRate": 10, "sceneClassification": [{"name": "soccer"}]}}`)
-	defer ts18.Close()
-	params = createSid(u).(*core.StreamParameters)
-	detectorProf := ffmpeg.DSceneAdultSoccer
-	detectorProf.SampleRate = 10
-	expectedDetection := core.DetectionConfig{
-		Freq:               5,
-		SelectedClassNames: []string{"soccer"},
-		Profiles: []ffmpeg.DetectorProfile{
-			&detectorProf,
-		},
-	}
-	assert.Equal(expectedDetection, params.Detection, "Did not have matching detector config")
-
-	// do not create stream if detector class is unknown
-	ts19 := makeServer(`{"manifestID":"a", "detection": {"freq": 5, "sampleRate": 10, "sceneClassification": [{"name": "Unknown class"}]}}`)
-	defer ts19.Close()
-	sid = createSid(u)
-	assert.Nil(sid)
+	assert.Equal(int32(net.OSInfo_S3), int32(osinfo.StorageType))
+	assert.Equal("http://record.store", osinfo.S3Info.Host)
 }
 
 func TestCreateRTMPStreamHandler(t *testing.T) {
@@ -707,7 +682,7 @@ func TestCreateRTMPStreamHandler(t *testing.T) {
 	defer cancel()
 	s.RTMPSegmenter = &StubSegmenter{skip: true}
 	handler := gotRTMPStreamHandler(s)
-	createSid := createRTMPStreamIDHandler(context.TODO(), s)
+	createSid := createRTMPStreamIDHandler(context.TODO(), s, nil)
 	endHandler := endRTMPStreamHandler(s)
 	// Test default path structure
 	expectedSid := core.MakeStreamIDFromString("ghijkl", "secretkey")
@@ -775,12 +750,140 @@ func TestCreateRTMPStreamHandler(t *testing.T) {
 	st.Close()
 }
 
+// Test that when an Auth header is present, it overrides values from the callback URL
+func TestCreateRTMPStreamHandlerWithAuthHeader(t *testing.T) {
+	// Example profile, used to check behaviour when returned by Auth header / callback URL
+	profiles := []ffmpeg.JsonProfile{
+		{
+			Name:    "P144p30fps16x9",
+			Bitrate: 400000,
+			Width:   256,
+			Height:  144,
+		},
+	}
+
+	// Monkey patch rng to avoid unpredictability even when seeding
+	oldRandFunc := common.RandomIDGenerator
+	common.RandomIDGenerator = func(length uint) string {
+		return "abcdef"
+	}
+	defer func() { common.RandomIDGenerator = oldRandFunc }()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out, _ := ioutil.ReadAll(r.Body)
+		var req authWebhookReq
+		err := json.Unmarshal(out, &req)
+		if err != nil {
+			fmt.Printf("Error parsing URL: %v\n", err)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		j, err := json.Marshal(authWebhookResponse{
+			ManifestID: "!!!!!Should be overridden!!!!",
+			Profiles:   profiles,
+		})
+		require.NoError(t, err)
+
+		w.Write(j)
+	}))
+	defer ts.Close()
+	AuthWebhookURL = mustParseUrl(t, ts.URL)
+	defer func() { AuthWebhookURL = nil }()
+
+	s, cancel := setupServerWithCancel()
+	defer serverCleanup(s)
+	defer cancel()
+	s.RTMPSegmenter = &StubSegmenter{skip: true}
+	createSid := createRTMPStreamIDHandler(context.TODO(), s, &authWebhookResponse{
+		ManifestID: "override-manifest-id",
+		Profiles:   profiles,
+	})
+
+	// Test default path structure
+	expectedSid := core.MakeStreamIDFromString("override-manifest-id", "abcdef")
+	u := mustParseUrl(t, "rtmp://localhost/"+expectedSid.String()) // with key
+
+	sid := createSid(u)
+	require.NotNil(t, sid)
+	require.Equal(t, expectedSid.String(), sid.StreamID())
+
+	sap := sid.(*core.StreamParameters)
+	require.Len(t, sap.Profiles, 1)
+	require.Equal(t, "P144p30fps16x9", sap.Profiles[0].Name)
+	require.Equal(t, "256x144", sap.Profiles[0].Resolution)
+	require.Equal(t, "400000", sap.Profiles[0].Bitrate)
+}
+
+// Test that when an Auth header is present, we get an error response if the Profiles it provides
+// are different to those that come from the Callback URL
+func TestCreateRTMPStreamHandlerWithAuthHeader_DifferentProfilesToCallbackURL(t *testing.T) {
+	// Monkey patch rng to avoid unpredictability even when seeding
+	oldRandFunc := common.RandomIDGenerator
+	common.RandomIDGenerator = func(length uint) string {
+		return "abcdef"
+	}
+	defer func() { common.RandomIDGenerator = oldRandFunc }()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out, _ := ioutil.ReadAll(r.Body)
+		var req authWebhookReq
+		err := json.Unmarshal(out, &req)
+		if err != nil {
+			fmt.Printf("Error parsing URL: %v\n", err)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		j, err := json.Marshal(authWebhookResponse{
+			ManifestID: "!!!!!Should be overridden!!!!",
+			Profiles: []ffmpeg.JsonProfile{
+				{
+					Name:    "This is different",
+					Bitrate: 1,
+					Width:   1,
+					Height:  1,
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		w.Write(j)
+	}))
+	defer ts.Close()
+	AuthWebhookURL = mustParseUrl(t, ts.URL)
+	defer func() { AuthWebhookURL = nil }()
+
+	s, cancel := setupServerWithCancel()
+	defer serverCleanup(s)
+	defer cancel()
+	s.RTMPSegmenter = &StubSegmenter{skip: true}
+	createSid := createRTMPStreamIDHandler(context.TODO(), s, &authWebhookResponse{
+		ManifestID: "override-manifest-id",
+		Profiles: []ffmpeg.JsonProfile{
+			{
+				Name:    "P144p30fps16x9",
+				Bitrate: 400000,
+				Width:   256,
+				Height:  144,
+			},
+		},
+	})
+
+	// Test default path structure
+	expectedSid := core.MakeStreamIDFromString("override-manifest-id", "abcdef")
+	u := mustParseUrl(t, "rtmp://localhost/"+expectedSid.String()) // with key
+
+	sid := createSid(u)
+	require.Nil(t, sid)
+}
+
 func TestEndRTMPStreamHandler(t *testing.T) {
 	s, cancel := setupServerWithCancel()
 	defer serverCleanup(s)
 	defer cancel()
 	s.RTMPSegmenter = &StubSegmenter{skip: true}
-	createSid := createRTMPStreamIDHandler(context.TODO(), s)
+	createSid := createRTMPStreamIDHandler(context.TODO(), s, nil)
 	handler := gotRTMPStreamHandler(s)
 	endHandler := endRTMPStreamHandler(s)
 	u := mustParseUrl(t, "rtmp://localhost")
@@ -892,7 +995,7 @@ func TestMultiStream(t *testing.T) {
 	s.RTMPSegmenter = &StubSegmenter{skip: true}
 	handler := gotRTMPStreamHandler(s)
 	u := mustParseUrl(t, "rtmp://localhost")
-	createSid := createRTMPStreamIDHandler(context.TODO(), s)
+	createSid := createRTMPStreamIDHandler(context.TODO(), s, nil)
 
 	handleStream := func(i int) {
 		st := stream.NewBasicRTMPVideoStream(createSid(u))
@@ -1006,13 +1109,13 @@ func TestRegisterConnection(t *testing.T) {
 
 	// Should return an error if missing node storage
 	drivers.NodeStorage = nil
-	_, err := s.registerConnection(context.TODO(), strm, nil)
+	_, err := s.registerConnection(context.TODO(), strm, nil, PixelFormatNone(), nil)
 	assert.Equal(err, errStorage)
 	drivers.NodeStorage = drivers.NewMemoryDriver(nil)
 
 	// normal success case
 	rand.Seed(123)
-	cxn, err := s.registerConnection(context.TODO(), strm, nil)
+	cxn, err := s.registerConnection(context.TODO(), strm, nil, PixelFormatNone(), nil)
 	assert.NotNil(cxn)
 	assert.Nil(err)
 
@@ -1028,31 +1131,33 @@ func TestRegisterConnection(t *testing.T) {
 	assert.NotNil(cxn.params.Capabilities)
 
 	// Should return an error if creating another cxn with the same mid
-	_, err = s.registerConnection(context.TODO(), strm, nil)
+	_, err = s.registerConnection(context.TODO(), strm, nil, PixelFormatNone(), nil)
 	assert.Equal(err, errAlreadyExists)
 
 	// Check for params with an existing OS assigned
-	storage := drivers.NewS3Driver("", "", "", "", false).NewSession("")
+	driver, err := drivers.NewS3Driver("", "", "", "", "", false)
+	assert.Nil(err)
+	storage := driver.NewSession("")
 	strm = stream.NewBasicRTMPVideoStream(&core.StreamParameters{ManifestID: core.RandomManifestID(), OS: storage})
-	cxn, err = s.registerConnection(context.TODO(), strm, nil)
+	cxn, err = s.registerConnection(context.TODO(), strm, nil, PixelFormatNone(), nil)
 	assert.Nil(err)
 	assert.Equal(storage, cxn.params.OS)
-	assert.Equal(net.OSInfo_S3, cxn.params.OS.GetInfo().StorageType)
+	assert.Equal(int32(net.OSInfo_S3), int32(cxn.params.OS.GetInfo().StorageType))
 	assert.Equal(cxn.params.OS, cxn.pl.GetOSSession())
 
 	// check for capabilities
 	profiles := []ffmpeg.VideoProfile{ffmpeg.P144p30fps16x9}
 	strm = stream.NewBasicRTMPVideoStream(&core.StreamParameters{ManifestID: core.RandomManifestID(), Profiles: profiles})
-	cxn, err = s.registerConnection(context.TODO(), strm, nil)
+	cxn, err = s.registerConnection(context.TODO(), strm, nil, PixelFormatNone(), nil)
 	assert.Nil(err)
-	job, err := core.JobCapabilities(streamParams(strm.AppData()))
+	job, err := core.JobCapabilities(streamParams(strm.AppData()), nil)
 	assert.Nil(err)
 	assert.Equal(job, cxn.params.Capabilities)
 
 	// check for capabilities with codec specified
 	inCodec := ffmpeg.H264
 	strm = stream.NewBasicRTMPVideoStream(&core.StreamParameters{ManifestID: core.RandomManifestID(), Profiles: profiles})
-	cxn, err = s.registerConnection(context.TODO(), strm, &inCodec)
+	cxn, err = s.registerConnection(context.TODO(), strm, &inCodec, PixelFormatNone(), nil)
 	assert.Nil(err)
 	assert.True(core.NewCapabilities([]core.Capability{core.Capability_H264}, []core.Capability{}).CompatibleWith(cxn.params.Capabilities.ToNetCapabilities()))
 	assert.False(core.NewCapabilities([]core.Capability{core.Capability_HEVC_Decode}, []core.Capability{}).CompatibleWith(cxn.params.Capabilities.ToNetCapabilities()))
@@ -1060,7 +1165,7 @@ func TestRegisterConnection(t *testing.T) {
 	inCodec = ffmpeg.H265
 	profiles[0].Encoder = ffmpeg.H265
 	strm = stream.NewBasicRTMPVideoStream(&core.StreamParameters{ManifestID: core.RandomManifestID(), Profiles: profiles})
-	cxn, err = s.registerConnection(context.TODO(), strm, &inCodec)
+	cxn, err = s.registerConnection(context.TODO(), strm, &inCodec, PixelFormatNone(), nil)
 	assert.Nil(err)
 	assert.True(core.NewCapabilities([]core.Capability{
 		core.Capability_HEVC_Decode,
@@ -1070,7 +1175,7 @@ func TestRegisterConnection(t *testing.T) {
 	// check for capabilities: exit with an invalid cap
 	profiles[0].Format = -1
 	strm = stream.NewBasicRTMPVideoStream(&core.StreamParameters{ManifestID: core.RandomManifestID(), Profiles: profiles})
-	cxn, err = s.registerConnection(context.TODO(), strm, nil)
+	cxn, err = s.registerConnection(context.TODO(), strm, nil, PixelFormatNone(), nil)
 	assert.Nil(cxn)
 	assert.Equal("capability: unknown format", err.Error())
 	// TODO test with non-legacy capabilities once we have some
@@ -1085,7 +1190,7 @@ func TestRegisterConnection(t *testing.T) {
 			name := fmt.Sprintf("%v_%v", t.Name(), i)
 			mid := core.SplitStreamIDString(name).ManifestID
 			strm := stream.NewBasicRTMPVideoStream(&core.StreamParameters{ManifestID: mid})
-			cxn, err := s.registerConnection(context.TODO(), strm, nil)
+			cxn, err := s.registerConnection(context.TODO(), strm, nil, PixelFormatNone(), nil)
 
 			assert.Nil(err)
 			assert.NotNil(cxn)
@@ -1097,7 +1202,9 @@ func TestRegisterConnection(t *testing.T) {
 }
 
 func TestBroadcastSessionManagerWithStreamStartStop(t *testing.T) {
-	assert := assert.New(t)
+	goleakOptions := common.IgnoreRoutines()
+	defer goleak.VerifyNone(t, goleakOptions...)
+	assert := require.New(t)
 
 	s, cancel := setupServerWithCancel()
 	defer func() {
@@ -1116,7 +1223,7 @@ func TestBroadcastSessionManagerWithStreamStartStop(t *testing.T) {
 
 	// create RTMPStream handler methods
 	s.RTMPSegmenter = &StubSegmenter{skip: true}
-	createSid := createRTMPStreamIDHandler(context.TODO(), s)
+	createSid := createRTMPStreamIDHandler(context.TODO(), s, nil)
 	handler := gotRTMPStreamHandler(s)
 	endHandler := endRTMPStreamHandler(s)
 
@@ -1260,7 +1367,7 @@ func TestJsonProfileToVideoProfiles(t *testing.T) {
 	resp := &authWebhookResponse{}
 
 	// test empty case
-	p, err := jsonProfileToVideoProfile(resp)
+	p, err := ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
 	assert.Nil(err)
 	assert.Len(p, 0)
 
@@ -1268,13 +1375,14 @@ func TestJsonProfileToVideoProfiles(t *testing.T) {
 	assert.Nil(err)
 
 	// test default name
-	p, err = jsonProfileToVideoProfile(resp)
+	p, err = ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
 	assert.Nil(err)
-	assert.Equal("webhook_1x2_0", p[0].Name)
+	// TODO: Did i break some code with default naming being `custom` ?
+	assert.Equal("custom_1x2_0", p[0].Name)
 
 	// test provided name
 	resp.Profiles[0].Name = "abc"
-	p, err = jsonProfileToVideoProfile(resp)
+	p, err = ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
 	assert.Nil(err)
 	assert.Equal("abc", p[0].Name)
 
@@ -1284,59 +1392,56 @@ func TestJsonProfileToVideoProfiles(t *testing.T) {
 
 	// test gop intra
 	resp.Profiles[0].GOP = "intra"
-	p, err = jsonProfileToVideoProfile(resp)
+	p, err = ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
 	assert.Nil(err)
 	assert.Equal(ffmpeg.GOPIntraOnly, p[0].GOP)
 
 	// test gop float
 	resp.Profiles[0].GOP = "1.2"
-	p, err = jsonProfileToVideoProfile(resp)
+	p, err = ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
 	assert.Nil(err)
 	assert.Equal(time.Duration(1200)*time.Millisecond, p[0].GOP)
 
 	// test gop integer
 	resp.Profiles[0].GOP = "60"
-	p, err = jsonProfileToVideoProfile(resp)
+	p, err = ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
 	assert.Nil(err)
 	assert.Equal(time.Minute, p[0].GOP)
 
 	// test gop 0
 	resp.Profiles[0].GOP = "0"
-	p, err = jsonProfileToVideoProfile(resp)
+	p, err = ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
 	assert.Nil(err)
 	assert.Equal(time.Duration(0), p[0].GOP)
 
 	// test gop <0
 	resp.Profiles[0].GOP = "-0.001"
-	p, err = jsonProfileToVideoProfile(resp)
-	assert.Nil(p)
+	_, err = ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
 	assert.NotNil(err)
-	assert.Equal("invalid gop value", err.Error())
+	assert.Equal("invalid gop value -0.001000. Please set it to a positive value", err.Error())
 
 	// test gop non-numeric
 	resp.Profiles[0].GOP = " 1 "
-	p, err = jsonProfileToVideoProfile(resp)
-	assert.Nil(p)
+	_, err = ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
 	assert.NotNil(err)
 	assert.Contains(err.Error(), "strconv.ParseFloat: parsing")
 	resp.Profiles[0].GOP = ""
 
 	// test default encoding profile
-	p, err = jsonProfileToVideoProfile(resp)
+	_, err = ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
 	assert.Nil(err)
 	assert.Equal(ffmpeg.ProfileNone, p[0].Profile)
 
 	// test encoding profile
 	resp.Profiles[0].Profile = "h264baseline"
-	p, err = jsonProfileToVideoProfile(resp)
+	p, err = ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
 	assert.Nil(err)
 	assert.Equal(ffmpeg.ProfileH264Baseline, p[0].Profile)
 
 	// test invalid encoding profile
 	resp.Profiles[0].Profile = "invalid"
-	p, err = jsonProfileToVideoProfile(resp)
-	assert.Nil(p)
-	assert.Equal(common.ErrProfName, err)
+	_, err = ffmpeg.ParseProfilesFromJsonProfileArray(resp.Profiles)
+	assert.Equal("unable to parse the H264 encoder profile: unknown VideoProfile profile name", err.Error())
 }
 
 func mustParseUrl(t *testing.T, str string) *url.URL {

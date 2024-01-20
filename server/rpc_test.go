@@ -28,9 +28,9 @@ import (
 	"github.com/livepeer/go-livepeer/common"
 	"github.com/livepeer/go-livepeer/core"
 	"github.com/livepeer/go-livepeer/crypto"
-	"github.com/livepeer/go-livepeer/drivers"
 	"github.com/livepeer/go-livepeer/net"
 	"github.com/livepeer/go-livepeer/pm"
+	"github.com/livepeer/go-tools/drivers"
 	"github.com/livepeer/lpms/ffmpeg"
 	"github.com/livepeer/lpms/stream"
 )
@@ -137,7 +137,7 @@ func (r *stubOrchestrator) TicketParams(sender ethcommon.Address, priceInfo *net
 	return r.ticketParams, nil
 }
 
-func (r *stubOrchestrator) PriceInfo(sender ethcommon.Address) (*net.PriceInfo, error) {
+func (r *stubOrchestrator) PriceInfo(sender ethcommon.Address, manifestID core.ManifestID) (*net.PriceInfo, error) {
 	return r.priceInfo, nil
 }
 
@@ -250,7 +250,7 @@ func TestRPCSeg(t *testing.T) {
 
 	segData := &stream.HLSSegment{}
 
-	creds, err := genSegCreds(s, segData, false)
+	creds, err := genSegCreds(s, segData, nil, false)
 	if err != nil {
 		t.Error("Unable to generate seg creds ", err)
 		return
@@ -262,7 +262,7 @@ func TestRPCSeg(t *testing.T) {
 
 	// error signing
 	b.signErr = fmt.Errorf("SignErr")
-	if _, err := genSegCreds(s, segData, false); err != b.signErr {
+	if _, err := genSegCreds(s, segData, nil, false); err != b.signErr {
 		t.Error("Generating seg creds ", err)
 	}
 	b.signErr = nil
@@ -283,28 +283,28 @@ func TestRPCSeg(t *testing.T) {
 
 	// missing auth token
 	s.OrchestratorInfo.AuthToken = nil
-	creds, err = genSegCreds(s, &stream.HLSSegment{Duration: 1.5}, false)
+	creds, err = genSegCreds(s, &stream.HLSSegment{Duration: 1.5}, nil, false)
 	require.Nil(t, err)
 	_, _, err = verifySegCreds(context.TODO(), o, creds, baddr)
 	assert.Equal(t, "missing auth token", err.Error())
 
 	// invalid auth token
 	s.OrchestratorInfo.AuthToken = &net.AuthToken{Token: []byte("notfoo")}
-	creds, err = genSegCreds(s, &stream.HLSSegment{Duration: 1.5}, false)
+	creds, err = genSegCreds(s, &stream.HLSSegment{Duration: 1.5}, nil, false)
 	require.Nil(t, err)
 	_, _, err = verifySegCreds(context.TODO(), o, creds, baddr)
 	assert.Equal(t, "invalid auth token", err.Error())
 
 	// expired auth token
 	s.OrchestratorInfo.AuthToken = &net.AuthToken{Token: authToken.Token, SessionId: authToken.SessionId, Expiration: time.Now().Add(-1 * time.Hour).Unix()}
-	creds, err = genSegCreds(s, &stream.HLSSegment{Duration: 1.5}, false)
+	creds, err = genSegCreds(s, &stream.HLSSegment{Duration: 1.5}, nil, false)
 	assert.Nil(t, err)
 	_, _, err = verifySegCreds(context.TODO(), o, creds, baddr)
 	assert.Equal(t, "expired auth token", err.Error())
 	s.OrchestratorInfo.AuthToken = authToken
 
 	// check duration
-	creds, err = genSegCreds(s, &stream.HLSSegment{Duration: 1.5}, false)
+	creds, err = genSegCreds(s, &stream.HLSSegment{Duration: 1.5}, nil, false)
 	if err != nil {
 		t.Error("Could not generate creds ", err)
 	}
@@ -416,9 +416,9 @@ func TestEstimateFee(t *testing.T) {
 	assert.Zero(fee.Cmp(expFee))
 
 	// Test estimation with fps pass-through
-	// pixels = (256 * 144 * 120 * 3) + (426 * 240 * 30 * 3)
+	// pixels = (256 * 144 * 60 * 3) + (426 * 240 * 30 * 3)
 	profiles[0].Framerate = 0
-	expFee = new(big.Rat).SetInt64(22472640)
+	expFee = new(big.Rat).SetInt64(15837120)
 	expFee.Mul(expFee, new(big.Rat).SetFloat64(pixelEstimateMultiplier))
 	expFee.Mul(expFee, priceInfo)
 	fee, err = estimateFee(&stream.HLSSegment{Duration: 3.0}, profiles, priceInfo)
@@ -696,7 +696,23 @@ func TestValidatePrice(t *testing.T) {
 	err = validatePrice(s)
 	assert.Nil(err)
 
+	// O Initial Price == O Price
+	s.InitialPrice = oinfo.PriceInfo
+	err = validatePrice(s)
+	assert.Nil(err)
+
+	// O Initial Price higher than O Price
+	s.InitialPrice = &net.PriceInfo{PricePerUnit: 10, PixelsPerUnit: 3}
+	err = validatePrice(s)
+	assert.Nil(err)
+
+	// O Initial Price lower than O Price
+	s.InitialPrice = &net.PriceInfo{PricePerUnit: 1, PixelsPerUnit: 10}
+	err = validatePrice(s)
+	assert.ErrorContains(err, "price has changed")
+
 	// B MaxPrice < O Price
+	s.InitialPrice = nil
 	BroadcastCfg.SetMaxPrice(big.NewRat(1, 5))
 	err = validatePrice(s)
 	assert.EqualError(err, fmt.Sprintf("Orchestrator price higher than the set maximum price of %v wei per %v pixels", int64(1), int64(5)))
@@ -1034,7 +1050,7 @@ func TestGetPriceInfo_NoWebhook_DefaultPriceError_ReturnsError(t *testing.T) {
 
 	orch.On("PriceInfo", mock.Anything).Return(nil, expErr)
 
-	p, err := getPriceInfo(orch, addr)
+	p, err := getPriceInfo(orch, addr, "")
 	assert.Nil(p)
 	assert.EqualError(err, expErr.Error())
 }
@@ -1052,7 +1068,7 @@ func TestGetPriceInfo_NoWebhook_ReturnsDefaultPrice(t *testing.T) {
 
 	orch.On("PriceInfo", mock.Anything).Return(priceInfo, nil)
 
-	p, err := getPriceInfo(orch, addr)
+	p, err := getPriceInfo(orch, addr, "")
 	assert.Equal(p.PricePerUnit, int64(100))
 	assert.Equal(p.PixelsPerUnit, int64(30))
 	assert.Nil(err)
@@ -1076,7 +1092,7 @@ func TestGetPriceInfo_Webhook_NoCache_ReturnsDefaultPrice(t *testing.T) {
 
 	orch.On("PriceInfo", mock.Anything).Return(priceInfo, nil)
 
-	p, err := getPriceInfo(orch, addr)
+	p, err := getPriceInfo(orch, addr, "")
 	assert.Equal(p.PricePerUnit, int64(100))
 	assert.Equal(p.PixelsPerUnit, int64(30))
 	assert.Nil(err)
@@ -1102,7 +1118,7 @@ func TestGetPriceInfo_Webhook_Cache_WrongType_ReturnsDefaultPrice(t *testing.T) 
 
 	orch.On("PriceInfo", mock.Anything).Return(priceInfo, nil)
 
-	p, err := getPriceInfo(orch, addr)
+	p, err := getPriceInfo(orch, addr, "")
 	assert.Equal(p.PricePerUnit, int64(100))
 	assert.Equal(p.PixelsPerUnit, int64(30))
 	assert.Nil(err)
@@ -1133,7 +1149,7 @@ func TestGetPriceInfo_Webhook_Cache_ReturnsCachePrice(t *testing.T) {
 
 	orch.On("PriceInfo", mock.Anything).Return(priceInfo, nil)
 
-	p, err := getPriceInfo(orch, addr)
+	p, err := getPriceInfo(orch, addr, "")
 	assert.Equal(p.PricePerUnit, int64(20))
 	assert.Equal(p.PixelsPerUnit, int64(19))
 	assert.Nil(err)
@@ -1149,9 +1165,9 @@ func TestGenVerify_RoundTrip_AuthToken(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		assert := assert.New(t) // in order to pick up the rapid rng
 
-		authTokenValidPeriod = time.Duration(rapid.Int64Range(int64(1*time.Minute), int64(2*time.Hour)).Draw(t, "authTokenValidPeriod").(int64))
-		randToken := rapid.SliceOfN(rapid.Byte(), 32, 32).Draw(t, "token").([]byte)
-		randSessionID := rapid.String().Draw(t, "sessionID").(string)
+		authTokenValidPeriod = time.Duration(rapid.Int64Range(int64(1*time.Minute), int64(2*time.Hour)).Draw(t, "authTokenValidPeriod"))
+		randToken := rapid.SliceOfN(rapid.Byte(), 32, 32).Draw(t, "token")
+		randSessionID := rapid.String().Draw(t, "sessionID")
 		authToken := &net.AuthToken{Token: randToken, SessionId: randSessionID, Expiration: time.Now().Add(authTokenValidPeriod).Unix()}
 
 		sess := &BroadcastSession{
@@ -1161,7 +1177,7 @@ func TestGenVerify_RoundTrip_AuthToken(t *testing.T) {
 		}
 		orch.authToken = authToken
 
-		creds, err := genSegCreds(sess, &stream.HLSSegment{}, false)
+		creds, err := genSegCreds(sess, &stream.HLSSegment{}, nil, false)
 		assert.Nil(err)
 		md, _, err := verifySegCreds(context.TODO(), orch, creds, ethcommon.Address{})
 		assert.Nil(err)
@@ -1175,11 +1191,11 @@ func TestGenVerify_RoundTrip_Capabilities(t *testing.T) {
 	// check invariant : verifySegCreds(genSegCreds(caps)).Capabilities == caps
 	rapid.Check(t, func(t *rapid.T) {
 		assert := assert.New(t) // in order to pick up the rapid rng
-		randCapsLen := rapid.IntRange(0, 256).Draw(t, "capLen").(int)
+		randCapsLen := rapid.IntRange(0, 256).Draw(t, "capLen")
 		randCaps := rapid.IntRange(0, 512)
 		caps := []core.Capability{}
 		for i := 0; i < randCapsLen; i++ {
-			caps = append(caps, core.Capability(randCaps.Draw(t, "cap").(int)))
+			caps = append(caps, core.Capability(randCaps.Draw(t, "cap")))
 		}
 		sess := &BroadcastSession{
 			Broadcaster: stubBroadcaster2(),
@@ -1190,7 +1206,7 @@ func TestGenVerify_RoundTrip_Capabilities(t *testing.T) {
 			OrchestratorInfo: &net.OrchestratorInfo{AuthToken: orch.AuthToken("bar", time.Now().Add(1*time.Hour).Unix())},
 		}
 		orch.caps = sess.Params.Capabilities
-		creds, err := genSegCreds(sess, &stream.HLSSegment{}, false)
+		creds, err := genSegCreds(sess, &stream.HLSSegment{}, nil, false)
 		assert.Nil(err)
 		md, _, err := verifySegCreds(context.TODO(), orch, creds, ethcommon.Address{})
 		assert.Equal(sess.Params.Capabilities, md.Caps)
@@ -1208,10 +1224,10 @@ func TestGenVerify_RoundTrip_Duration(t *testing.T) {
 	// check invariant : verifySegCreds(genSegCreds(dur)).Duration == dur
 	rapid.Check(t, func(t *rapid.T) {
 		assert := assert.New(t) // in order to pick up the rapid rng
-		randDur := rapid.IntRange(1, int(common.MaxDuration.Milliseconds())).Draw(t, "dur").(int)
+		randDur := rapid.IntRange(1, int(common.MaxDuration.Milliseconds())).Draw(t, "dur")
 		dur := time.Duration(randDur * int(time.Millisecond))
 		seg := &stream.HLSSegment{Duration: dur.Seconds()}
-		creds, err := genSegCreds(sess, seg, false)
+		creds, err := genSegCreds(sess, seg, nil, false)
 		assert.Nil(err)
 
 		md, _, err := verifySegCreds(context.TODO(), orch, creds, ethcommon.Address{})
@@ -1227,7 +1243,7 @@ func TestCoreNetSegData_RoundTrip_Duration(t *testing.T) {
 	// and vice versa.
 	rapid.Check(t, func(t *rapid.T) {
 		assert := assert.New(t) // in order to pick up the rapid rng
-		randDur := rapid.IntRange(1, int(common.MaxDuration.Milliseconds())).Draw(t, "dur").(int)
+		randDur := rapid.IntRange(1, int(common.MaxDuration.Milliseconds())).Draw(t, "dur")
 		dur := time.Duration(randDur * int(time.Millisecond))
 		segData := &net.SegData{Duration: int32(randDur)}
 		md := &core.SegTranscodingMetadata{Duration: dur, Profiles: []ffmpeg.VideoProfile{ffmpeg.P144p30fps16x9}}
@@ -1307,7 +1323,7 @@ func (o *mockOrchestrator) TicketParams(sender ethcommon.Address, priceInfo *net
 	return nil, args.Error(1)
 }
 
-func (o *mockOrchestrator) PriceInfo(sender ethcommon.Address) (*net.PriceInfo, error) {
+func (o *mockOrchestrator) PriceInfo(sender ethcommon.Address, manifestID core.ManifestID) (*net.PriceInfo, error) {
 	args := o.Called(sender)
 	if args.Get(0) != nil {
 		return args.Get(0).(*net.PriceInfo), args.Error(1)

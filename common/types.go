@@ -3,12 +3,12 @@ package common
 import (
 	"context"
 	"encoding/json"
-	"math/big"
-	"net/url"
-
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/livepeer/go-livepeer/net"
 	"github.com/livepeer/m3u8"
+	"math/big"
+	"net/url"
+	"sync"
 )
 
 type RemoteTranscoderInfo struct {
@@ -38,6 +38,7 @@ type NodeStatus struct {
 	RegisteredTranscodersNumber int
 	RegisteredTranscoders       []RemoteTranscoderInfo
 	LocalTranscoding            bool // Indicates orchestrator that is also transcoder
+	BroadcasterPrices           map[string]*big.Rat
 	// xxx add transcoder's version here
 }
 
@@ -61,6 +62,30 @@ type OrchestratorLocalInfo struct {
 	Score float32
 }
 
+// combines B's local metadata about O with info received from this O
+type OrchestratorDescriptor struct {
+	LocalInfo  *OrchestratorLocalInfo
+	RemoteInfo *net.OrchestratorInfo
+}
+
+type OrchestratorDescriptors []OrchestratorDescriptor
+
+func (ds OrchestratorDescriptors) GetRemoteInfos() []*net.OrchestratorInfo {
+	var ois []*net.OrchestratorInfo
+	for _, d := range ds {
+		ois = append(ois, d.RemoteInfo)
+	}
+	return ois
+}
+
+func FromRemoteInfos(infos []*net.OrchestratorInfo) OrchestratorDescriptors {
+	var ods OrchestratorDescriptors
+	for _, oi := range infos {
+		ods = append(ods, OrchestratorDescriptor{nil, oi})
+	}
+	return ods
+}
+
 func (u *OrchestratorLocalInfo) MarshalJSON() ([]byte, error) {
 	type Alias OrchestratorLocalInfo
 	return json.Marshal(&struct {
@@ -74,12 +99,19 @@ func (u *OrchestratorLocalInfo) MarshalJSON() ([]byte, error) {
 
 type ScorePred = func(float32) bool
 type OrchestratorPool interface {
-	// GetInfo gets info for specific orchestrator
-	GetInfo(uri string) OrchestratorLocalInfo
 	GetInfos() []OrchestratorLocalInfo
-	GetOrchestrators(context.Context, int, Suspender, CapabilityComparator, ScorePred) ([]*net.OrchestratorInfo, error)
+	GetOrchestrators(context.Context, int, Suspender, CapabilityComparator, ScorePred) (OrchestratorDescriptors, error)
 	Size() int
 	SizeWith(ScorePred) int
+}
+
+type SelectionAlgorithm interface {
+	Select(addrs []ethcommon.Address, stakes map[ethcommon.Address]int64, prices map[ethcommon.Address]float64, perfScores map[ethcommon.Address]float64) ethcommon.Address
+}
+
+type PerfScore struct {
+	Mu     sync.Mutex
+	Scores map[ethcommon.Address]float64
 }
 
 func ScoreAtLeast(minScore float32) ScorePred {
@@ -106,14 +138,4 @@ type OrchestratorStore interface {
 
 type RoundsManager interface {
 	LastInitializedRound() *big.Int
-}
-
-type SceneClassificationResult struct {
-	Name        string  `json:"name"`
-	Probability float64 `json:"probability"`
-}
-type DetectionWebhookRequest struct {
-	ManifestID          string                      `json:"manifestID"`
-	SeqNo               uint64                      `json:"seqNo"`
-	SceneClassification []SceneClassificationResult `json:"sceneClassification"`
 }

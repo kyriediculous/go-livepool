@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/ioutil"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,8 +12,9 @@ import (
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 
-	"github.com/livepeer/go-livepeer/drivers"
 	"github.com/livepeer/go-livepeer/net"
+	"github.com/livepeer/go-livepeer/pm"
+	"github.com/livepeer/go-tools/drivers"
 	"github.com/livepeer/lpms/ffmpeg"
 )
 
@@ -165,7 +167,7 @@ func TestVerify(t *testing.T) {
 		{Url: "../server/test.flv", Pixels: pxls},
 	}}
 	renditions = [][]byte{}
-	res, err = sv.Verify(&Params{Results: data, Orchestrator: &net.OrchestratorInfo{TicketParams: &net.TicketParams{}}, Renditions: renditions})
+	res, err = sv.Verify(&Params{Results: data, Orchestrator: &net.OrchestratorInfo{Address: pm.RandAddress().Bytes(), TicketParams: &net.TicketParams{}}, Renditions: renditions})
 	assert.Equal(errPMCheckFailed, err)
 	assert.Nil(res)
 
@@ -173,6 +175,7 @@ func TestVerify(t *testing.T) {
 	// We use this stubVerifier to make sure that ffmpeg doesnt try to read from a file
 	// Verify sig against ticket recipient address
 	recipientAddr := ethcommon.BytesToAddress([]byte("foo"))
+	orchAddr := ethcommon.Address{}
 	sv = &SegmentVerifier{policy: &Policy{Verifier: &stubVerifier{
 		results: nil,
 		err:     nil,
@@ -187,12 +190,12 @@ func TestVerify(t *testing.T) {
 
 	renditions = [][]byte{{0}, {0}}
 	params := &net.TicketParams{Recipient: recipientAddr.Bytes()}
-	res, err = sv.Verify(&Params{Results: data, Orchestrator: &net.OrchestratorInfo{TicketParams: params}, Renditions: renditions})
+	res, err = sv.Verify(&Params{Results: data, Orchestrator: &net.OrchestratorInfo{Address: orchAddr.Bytes(), TicketParams: params}, Renditions: renditions})
 	assert.Nil(err)
 	assert.NotNil(res)
 
 	// Verify sig against orchestrator provided address
-	orchAddr := ethcommon.BytesToAddress([]byte("bar"))
+	orchAddr = ethcommon.BytesToAddress([]byte("bar"))
 	sv = &SegmentVerifier{
 		policy:    &Policy{Verifier: &stubVerifier{}, Retries: 2},
 		verifySig: func(addr ethcommon.Address, msg []byte, sig []byte) bool { return addr == orchAddr },
@@ -211,13 +214,13 @@ func TestVerify(t *testing.T) {
 		{Url: "uvw", Pixels: pxls},
 		{Url: "xyz", Pixels: pxls},
 	}}
-	res, err = sv.Verify(&Params{Results: data, Orchestrator: &net.OrchestratorInfo{TicketParams: &net.TicketParams{}}, Renditions: renditions})
+	res, err = sv.Verify(&Params{Results: data, Orchestrator: &net.OrchestratorInfo{Address: []byte("bar"), TicketParams: params}, Renditions: renditions})
 	assert.Equal(errPMCheckFailed, err)
 	assert.Nil(res)
 
 	// Check sig verifier runs and fails (due to missing sig) even when policy is nil
 	sv = NewSegmentVerifier(nil)
-	res, err = sv.Verify(&Params{Results: data, Orchestrator: &net.OrchestratorInfo{TicketParams: &net.TicketParams{}}, Renditions: renditions})
+	res, err = sv.Verify(&Params{Results: data, Orchestrator: &net.OrchestratorInfo{Address: []byte("bar"), TicketParams: params}, Renditions: renditions})
 	assert.Equal(errPMCheckFailed, err)
 	assert.Nil(res)
 
@@ -306,7 +309,9 @@ func TestPixels(t *testing.T) {
 	assert := assert.New(t)
 
 	p, err := pixels("foo")
-	assert.EqualError(err, "No such file or directory")
+	// Early codec check didn't find video in missing input file so
+	//  we get `TranscoderInvalidVideo` err instead of `No such file or directory`
+	assert.EqualError(err, "TranscoderInvalidVideo")
 	assert.Equal(int64(0), p)
 
 	// Assume that ffmpeg.Transcode3() returns the correct pixel count so we just
@@ -338,9 +343,10 @@ func TestVerifyPixels(t *testing.T) {
 
 	// Create memory session and save a test file
 	bos := drivers.NewMemoryDriver(nil).NewSession("foo")
-	data, err := ioutil.ReadFile("../server/test.flv")
+	file, err := os.Open("../server/test.flv")
 	require.Nil(err)
-	fname, err := bos.SaveData(context.TODO(), "test.ts", data, nil, 0)
+	defer file.Close()
+	fname, err := bos.SaveData(context.TODO(), "test.ts", file, nil, 0)
 	require.Nil(err)
 	memOS, ok := bos.(*drivers.MemorySession)
 	require.True(ok)
@@ -348,7 +354,9 @@ func TestVerifyPixels(t *testing.T) {
 	// Test error for relative URI and no memory storage if the file does not exist on disk
 	// Will try to use the relative URI to read the file from disk and fail
 	err = verifyPixels(fname, nil, 50)
-	assert.EqualError(err, "Invalid data found when processing input")
+	// Early codec check didn't find video in missing input file so we get `TranscoderInvalidVideo`
+	//  instead of `Invalid data found when processing input`
+	assert.EqualError(err, "TranscoderInvalidVideo")
 
 	// Test writing temp file for relative URI and local memory storage with incorrect pixels
 	err = verifyPixels(fname, memOS.GetData(fname), 50)
@@ -363,5 +371,7 @@ func TestVerifyPixels(t *testing.T) {
 
 	// Test nil data
 	err = verifyPixels("../server/test.flv", nil, 50)
-	assert.EqualError(err, "Invalid data found when processing input")
+	// Early codec check didn't find video in missing input file so we get `TranscoderInvalidVideo`
+	//  instead of `Invalid data found when processing input`
+	assert.EqualError(err, "TranscoderInvalidVideo")
 }

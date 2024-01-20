@@ -1,16 +1,15 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"net/url"
-	"os"
 	"testing"
 
 	"github.com/golang/glog"
-	"github.com/livepeer/go-livepeer/drivers"
+	"github.com/livepeer/go-tools/drivers"
 	"github.com/livepeer/lpms/ffmpeg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,7 +17,6 @@ import (
 
 type StubTranscoder struct {
 	Profiles      []ffmpeg.VideoProfile
-	Detector      ffmpeg.DetectorProfile
 	SegCount      int
 	StoppedCount  int
 	FailTranscode bool
@@ -29,12 +27,12 @@ func newStubTranscoder(d string) TranscoderSession {
 	return &StubTranscoder{}
 }
 
-func newStubTranscoderWithDetector(detector ffmpeg.DetectorProfile, gpu string) (TranscoderSession, error) {
-	return &StubTranscoder{Detector: detector}, nil
-}
-
 func stubTranscoderWithProfiles(profiles []ffmpeg.VideoProfile) *StubTranscoder {
 	return &StubTranscoder{Profiles: profiles}
+}
+
+func (t *StubTranscoder) EndTranscodingSession(sessionId string) {
+
 }
 
 func (t *StubTranscoder) Transcode(ctx context.Context, md *SegTranscodingMetadata) (*TranscodeData, error) {
@@ -68,12 +66,10 @@ func TestTranscodeAndBroadcast(t *testing.T) {
 	storage := drivers.NewMemoryDriver(nil).NewSession("")
 	config := transcodeConfig{LocalOS: storage, OS: storage}
 
-	tmpdir, _ := ioutil.TempDir("", "")
-	n, err := NewLivepeerNode(nil, tmpdir, nil)
+	n, err := NewLivepeerNode(nil, t.TempDir(), nil)
 	if err != nil {
 		t.Errorf("Error: %v", err)
 	}
-	defer os.RemoveAll(tmpdir)
 	n.Transcoder = tr
 
 	md := &SegTranscodingMetadata{Profiles: p, AuthToken: stubAuthToken()}
@@ -136,7 +132,7 @@ func TestServiceURIChange(t *testing.T) {
 
 	drivers.NodeStorage = drivers.NewMemoryDriver(n.GetServiceURI())
 	sesh := drivers.NodeStorage.NewSession("testpath")
-	savedUrl, err := sesh.SaveData(context.TODO(), "testdata1", []byte{0, 0, 0}, nil, 0)
+	savedUrl, err := sesh.SaveData(context.TODO(), "testdata1", bytes.NewReader([]byte{0, 0, 0}), nil, 0)
 	require.Nil(err)
 	assert.Equal("test://testurl.com/stream/testpath/testdata1", savedUrl)
 
@@ -144,7 +140,7 @@ func TestServiceURIChange(t *testing.T) {
 	newUrl, err := url.Parse("test://newurl.com")
 	n.SetServiceURI(newUrl)
 	require.Nil(err)
-	furl, err := sesh.SaveData(context.TODO(), "testdata2", []byte{0, 0, 0}, nil, 0)
+	furl, err := sesh.SaveData(context.TODO(), "testdata2", bytes.NewReader([]byte{0, 0, 0}), nil, 0)
 	require.Nil(err)
 	assert.Equal("test://newurl.com/stream/testpath/testdata2", furl)
 
@@ -152,7 +148,7 @@ func TestServiceURIChange(t *testing.T) {
 	secondUrl, err := url.Parse("test://secondurl.com")
 	n.SetServiceURI(secondUrl)
 	require.Nil(err)
-	surl, err := sesh.SaveData(context.TODO(), "testdata3", []byte{0, 0, 0}, nil, 0)
+	surl, err := sesh.SaveData(context.TODO(), "testdata3", bytes.NewReader([]byte{0, 0, 0}), nil, 0)
 	require.Nil(err)
 	assert.Equal("test://secondurl.com/stream/testpath/testdata3", surl)
 }
@@ -166,7 +162,20 @@ func TestSetAndGetBasePrice(t *testing.T) {
 
 	price := big.NewRat(1, 1)
 
-	n.SetBasePrice(price)
-	assert.Zero(n.priceInfo.Cmp(price))
-	assert.Zero(n.GetBasePrice().Cmp(price))
+	n.SetBasePrice("default", price)
+	assert.Zero(n.priceInfo["default"].Cmp(price))
+	assert.Zero(n.GetBasePrice("default").Cmp(price))
+	assert.Zero(n.GetBasePrices()["default"].Cmp(price))
+
+	addr1 := "0x0000000000000000000000000000000000000000"
+	addr2 := "0x1000000000000000000000000000000000000000"
+	price1 := big.NewRat(2, 1)
+	price2 := big.NewRat(3, 1)
+
+	n.SetBasePrice(addr1, price1)
+	n.SetBasePrice(addr2, price2)
+	assert.Zero(n.priceInfo[addr1].Cmp(price1))
+	assert.Zero(n.priceInfo[addr2].Cmp(price2))
+	assert.Zero(n.GetBasePrices()[addr1].Cmp(price1))
+	assert.Zero(n.GetBasePrices()[addr2].Cmp(price2))
 }

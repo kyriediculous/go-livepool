@@ -10,8 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/golang/glog"
 	"github.com/livepeer/go-livepeer/clog"
+	lpnet "github.com/livepeer/go-livepeer/net"
 
 	"contrib.go.opencensus.io/exporter/prometheus"
 	rprom "github.com/prometheus/client_golang/prometheus"
@@ -46,6 +48,9 @@ const (
 	SegmentTranscodeErrorSaveData           SegmentTranscodeError = "SaveData"
 	SegmentTranscodeErrorSessionEnded       SegmentTranscodeError = "SessionEnded"
 	SegmentTranscodeErrorDuplicateSegment   SegmentTranscodeError = "DuplicateSegment"
+	SegmentTranscodeErrorMaxAttempts        SegmentTranscodeError = "MaxAttempts"
+	SegmentTranscodeErrorNonRetryable       SegmentTranscodeError = "NonRetryable"
+	SegmentTranscodeErrorCtxCancelled       SegmentTranscodeError = "CtxCancelled"
 
 	numberOfSegmentsToCalcAverage = 30
 	gweiConversionFactor          = 1000000000
@@ -65,6 +70,13 @@ const (
 
 	segTypeRegular = "regular"
 	segTypeRec     = "recorded" // segment in the stream for which recording is enabled
+)
+
+const (
+	//mpeg7-sign comparison fail of fast verification
+	FVType1Error = 1
+	//video comparison fail of fast verification
+	FVType2Error = 2
 )
 
 // Enabled true if metrics was enabled in command line
@@ -99,6 +111,8 @@ type (
 		kVerified                     tag.Key
 		kClientIP                     tag.Key
 		kOrchestratorURI              tag.Key
+		kOrchestratorAddress          tag.Key
+		kFVErrorType                  tag.Key
 		mSegmentSourceAppeared        *stats.Int64Measure
 		mSegmentEmerged               *stats.Int64Measure
 		mSegmentEmergedUnprocessed    *stats.Int64Measure
@@ -108,10 +122,7 @@ type (
 		mSegmentTranscoded            *stats.Int64Measure
 		mSegmentTranscodedUnprocessed *stats.Int64Measure
 		mSegmentTranscodeFailed       *stats.Int64Measure
-		mSegmentTranscodedAppeared    *stats.Int64Measure
 		mSegmentTranscodedAllAppeared *stats.Int64Measure
-		mStartBroadcastClientFailed   *stats.Int64Measure
-		mStreamCreateFailed           *stats.Int64Measure
 		mStreamCreated                *stats.Int64Measure
 		mStreamStarted                *stats.Int64Measure
 		mStreamEnded                  *stats.Int64Measure
@@ -125,7 +136,6 @@ type (
 		mSuccessRate                  *stats.Float64Measure
 		mSuccessRatePerStream         *stats.Float64Measure
 		mTranscodeTime                *stats.Float64Measure
-		mTranscodeLatency             *stats.Float64Measure
 		mTranscodeOverallLatency      *stats.Float64Measure
 		mUploadTime                   *stats.Float64Measure
 		mDownloadTime                 *stats.Float64Measure
@@ -146,12 +156,11 @@ type (
 		mOrchestratorSwaps            *stats.Int64Measure
 
 		// Metrics for sending payments
-		mTicketValueSent     *stats.Float64Measure
-		mTicketsSent         *stats.Int64Measure
-		mPaymentCreateError  *stats.Int64Measure
-		mDeposit             *stats.Float64Measure
-		mReserve             *stats.Float64Measure
-		mMaxTranscodingPrice *stats.Float64Measure
+		mTicketValueSent    *stats.Float64Measure
+		mTicketsSent        *stats.Int64Measure
+		mPaymentCreateError *stats.Int64Measure
+		mDeposit            *stats.Float64Measure
+		mReserve            *stats.Float64Measure
 		// Metrics for receiving payments
 		mTicketValueRecv       *stats.Float64Measure
 		mTicketsRecv           *stats.Int64Measure
@@ -164,6 +173,9 @@ type (
 		mMaxGasPrice           *stats.Float64Measure
 		mTranscodingPrice      *stats.Float64Measure
 
+		// Metrics for calling rewards
+		mRewardCallError *stats.Int64Measure
+
 		// Metrics for pixel accounting
 		mMilPixelsProcessed *stats.Float64Measure
 
@@ -172,6 +184,11 @@ type (
 		mFastVerificationFailed                 *stats.Int64Measure
 		mFastVerificationEnabledCurrentSessions *stats.Int64Measure
 		mFastVerificationUsingCurrentSessions   *stats.Int64Measure
+
+		// Metrics for scene classification
+		kSegClassName        tag.Key
+		mSegmentClassProb    *stats.Float64Measure
+		mSceneClassification *stats.Int64Measure
 
 		lock        sync.Mutex
 		emergeTimes map[uint64]map[uint64]time.Time // nonce:seqNo
@@ -234,9 +251,12 @@ func InitCensus(nodeType NodeType, version string) {
 	census.kVerified = tag.MustNewKey("verified")
 	census.kClientIP = tag.MustNewKey("client_ip")
 	census.kOrchestratorURI = tag.MustNewKey("orchestrator_uri")
+	census.kOrchestratorAddress = tag.MustNewKey("orchestrator_address")
+	census.kFVErrorType = tag.MustNewKey("fverror_type")
+	census.kSegClassName = tag.MustNewKey("seg_class_name")
 	census.ctx, err = tag.New(ctx, tag.Insert(census.kNodeType, string(nodeType)), tag.Insert(census.kNodeID, NodeID))
 	if err != nil {
-		glog.Fatal("Error creating context", err)
+		glog.Exit("Error creating context", err)
 	}
 	census.mHTTPClientTimeout1 = stats.Int64("http_client_timeout_1", "Number of times HTTP connection was dropped before transcoding complete", "tot")
 	census.mHTTPClientTimeout2 = stats.Int64("http_client_timeout_2", "Number of times HTTP connection was dropped before transcoded segments was sent back to client", "tot")
@@ -255,10 +275,7 @@ func InitCensus(nodeType NodeType, version string) {
 	census.mSegmentTranscoded = stats.Int64("segment_transcoded_total", "SegmentTranscoded", "tot")
 	census.mSegmentTranscodedUnprocessed = stats.Int64("segment_transcoded_unprocessed_total", "SegmentTranscodedUnprocessed", "tot")
 	census.mSegmentTranscodeFailed = stats.Int64("segment_transcode_failed_total", "SegmentTranscodeFailed", "tot")
-	census.mSegmentTranscodedAppeared = stats.Int64("segment_transcoded_appeared_total", "SegmentTranscodedAppeared", "tot")
 	census.mSegmentTranscodedAllAppeared = stats.Int64("segment_transcoded_all_appeared_total", "SegmentTranscodedAllAppeared", "tot")
-	census.mStartBroadcastClientFailed = stats.Int64("broadcast_client_start_failed_total", "StartBroadcastClientFailed", "tot")
-	census.mStreamCreateFailed = stats.Int64("stream_create_failed_total", "StreamCreateFailed", "tot")
 	census.mStreamCreated = stats.Int64("stream_created_total", "StreamCreated", "tot")
 	census.mStreamStarted = stats.Int64("stream_started_total", "StreamStarted", "tot")
 	census.mStreamEnded = stats.Int64("stream_ended_total", "StreamEnded", "tot")
@@ -272,8 +289,6 @@ func InitCensus(nodeType NodeType, version string) {
 	census.mSuccessRate = stats.Float64("success_rate", "Success rate", "per")
 	census.mSuccessRatePerStream = stats.Float64("success_rate_per_stream", "Success rate, per stream", "per")
 	census.mTranscodeTime = stats.Float64("transcode_time_seconds", "Transcoding time", "sec")
-	census.mTranscodeLatency = stats.Float64("transcode_latency_seconds",
-		"Transcoding latency, from source segment emerged from segmenter till transcoded segment apeeared in manifest", "sec")
 	census.mTranscodeOverallLatency = stats.Float64("transcode_overall_latency_seconds",
 		"Transcoding latency, from source segment emerged from segmenter till all transcoded segment apeeared in manifest", "sec")
 	census.mUploadTime = stats.Float64("upload_time_seconds", "Upload (to Orchestrator) time", "sec")
@@ -292,8 +307,7 @@ func InitCensus(nodeType NodeType, version string) {
 	census.mTicketsSent = stats.Int64("tickets_sent", "TicketsSent", "tot")
 	census.mPaymentCreateError = stats.Int64("payment_create_errors", "PaymentCreateError", "tot")
 	census.mDeposit = stats.Float64("broadcaster_deposit", "Current remaining deposit for the broadcaster node", "gwei")
-	census.mReserve = stats.Float64("broadcaster_reserve", "Current remaing reserve for the broadcaster node", "gwei")
-	census.mMaxTranscodingPrice = stats.Float64("max_transcoding_price", "MaxTranscodingPrice", "wei")
+	census.mReserve = stats.Float64("broadcaster_reserve", "Current remaining reserve for the broadcaster node", "gwei")
 
 	// Metrics for receiving payments
 	census.mTicketValueRecv = stats.Float64("ticket_value_recv", "TicketValueRecv", "gwei")
@@ -307,6 +321,9 @@ func InitCensus(nodeType NodeType, version string) {
 	census.mMaxGasPrice = stats.Float64("max_gas_price", "MaxGasPrice", "gwei")
 	census.mTranscodingPrice = stats.Float64("transcoding_price", "TranscodingPrice", "wei")
 
+	// Metrics for calling rewards
+	census.mRewardCallError = stats.Int64("reward_call_errors", "RewardCallError", "tot")
+
 	// Metrics for pixel accounting
 	census.mMilPixelsProcessed = stats.Float64("mil_pixels_processed", "MilPixelsProcessed", "mil pixels")
 
@@ -317,6 +334,10 @@ func InitCensus(nodeType NodeType, version string) {
 		"Number of currently transcoded streams that have fast verification enabled", "tot")
 	census.mFastVerificationUsingCurrentSessions = stats.Int64("fast_verification_using_current_sessions_total",
 		"Number of currently transcoded streams that have fast verification enabled and that are using an untrusted orchestrator", "tot")
+
+	// Metrics for scene classification
+	census.mSegmentClassProb = stats.Float64("segment_class_prob", "SegmentClassProb", "tot")
+	census.mSceneClassification = stats.Int64("scene_classification_done", "SceneClassificationDone", "tot")
 
 	glog.Infof("Compiler: %s Arch %s OS %s Go version %s", runtime.Compiler, runtime.GOARCH, runtime.GOOS, runtime.Version())
 	glog.Infof("Livepeer version: %s", version)
@@ -331,12 +352,13 @@ func InitCensus(nodeType NodeType, version string) {
 		tag.Insert(compiler, runtime.Compiler), tag.Insert(goarch, runtime.GOARCH), tag.Insert(goos, runtime.GOOS),
 		tag.Insert(goversion, runtime.Version()), tag.Insert(livepeerversion, version))
 	if err != nil {
-		glog.Fatal("Error creating tagged context", err)
+		glog.Exit("Error creating tagged context", err)
 	}
 	baseTags := []tag.Key{census.kNodeID, census.kNodeType}
 	baseTagsWithManifestID := baseTags
 	baseTagsWithEthAddr := baseTags
 	baseTagsWithManifestIDAndEthAddr := baseTags
+	baseTagsWithOrchInfo := baseTags
 	if PerStreamMetrics {
 		baseTagsWithManifestID = []tag.Key{census.kNodeID, census.kNodeType, census.kManifestID}
 		baseTagsWithEthAddr = []tag.Key{census.kNodeID, census.kNodeType, census.kSender}
@@ -346,6 +368,9 @@ func InitCensus(nodeType NodeType, version string) {
 	if ExposeClientIP {
 		baseTagsWithManifestIDAndIP = append([]tag.Key{census.kClientIP}, baseTagsWithManifestID...)
 	}
+	baseTagsWithManifestIDAndOrchInfo := baseTagsWithManifestID
+	baseTagsWithOrchInfo = append([]tag.Key{census.kOrchestratorURI, census.kOrchestratorAddress}, baseTags...)
+	baseTagsWithManifestIDAndOrchInfo = append([]tag.Key{census.kOrchestratorURI, census.kOrchestratorAddress}, baseTagsWithManifestID...)
 
 	views := []*view.View{
 		{
@@ -354,13 +379,6 @@ func InitCensus(nodeType NodeType, version string) {
 			Description: "Versions used by LivePeer node.",
 			TagKeys:     []tag.Key{census.kNodeType, compiler, goos, goversion, livepeerversion},
 			Aggregation: view.LastValue(),
-		},
-		{
-			Name:        "broadcast_client_start_failed_total",
-			Measure:     census.mStartBroadcastClientFailed,
-			Description: "StartBroadcastClientFailed",
-			TagKeys:     baseTags,
-			Aggregation: view.Count(),
 		},
 		{
 			Name:        "stream_created_total",
@@ -380,13 +398,6 @@ func InitCensus(nodeType NodeType, version string) {
 			Name:        "stream_ended_total",
 			Measure:     census.mStreamEnded,
 			Description: "StreamEnded",
-			TagKeys:     baseTags,
-			Aggregation: view.Count(),
-		},
-		{
-			Name:        "stream_create_failed_total",
-			Measure:     census.mStreamCreateFailed,
-			Description: "StreamCreateFailed",
 			TagKeys:     baseTags,
 			Aggregation: view.Count(),
 		},
@@ -499,7 +510,7 @@ func InitCensus(nodeType NodeType, version string) {
 			Name:        "segment_transcoded_unprocessed_total",
 			Measure:     census.mSegmentTranscodedUnprocessed,
 			Description: "Raw number of segments successfully transcoded.",
-			TagKeys:     append([]tag.Key{census.kProfiles}, baseTagsWithManifestID...),
+			TagKeys:     append([]tag.Key{census.kProfiles}, baseTagsWithManifestIDAndOrchInfo...),
 			Aggregation: view.Count(),
 		},
 		{
@@ -510,17 +521,10 @@ func InitCensus(nodeType NodeType, version string) {
 			Aggregation: view.Count(),
 		},
 		{
-			Name:        "segment_transcoded_appeared_total",
-			Measure:     census.mSegmentTranscodedAppeared,
-			Description: "SegmentTranscodedAppeared",
-			TagKeys:     append([]tag.Key{census.kProfile, census.kSegmentType}, baseTagsWithManifestID...),
-			Aggregation: view.Count(),
-		},
-		{
 			Name:        "segment_transcoded_all_appeared_total",
 			Measure:     census.mSegmentTranscodedAllAppeared,
 			Description: "SegmentTranscodedAllAppeared",
-			TagKeys:     append([]tag.Key{census.kProfiles}, baseTagsWithManifestID...),
+			TagKeys:     append([]tag.Key{census.kProfiles}, baseTagsWithManifestIDAndOrchInfo...),
 			Aggregation: view.Count(),
 		},
 		{
@@ -545,17 +549,10 @@ func InitCensus(nodeType NodeType, version string) {
 			Aggregation: view.Distribution(0, .250, .500, .750, 1.000, 1.250, 1.500, 2.000, 2.500, 3.000, 3.500, 4.000, 4.500, 5.000, 10.000),
 		},
 		{
-			Name:        "transcode_latency_seconds",
-			Measure:     census.mTranscodeLatency,
-			Description: "Transcoding latency, from source segment emerged from segmenter till transcoded segment apeeared in manifest",
-			TagKeys:     append([]tag.Key{census.kProfile}, baseTagsWithManifestID...),
-			Aggregation: view.Distribution(0, .500, .75, 1.000, 1.500, 2.000, 2.500, 3.000, 3.500, 4.000, 4.500, 5.000, 10.000),
-		},
-		{
 			Name:        "transcode_overall_latency_seconds",
 			Measure:     census.mTranscodeOverallLatency,
 			Description: "Transcoding latency, from source segment emerged from segmenter till all transcoded segment apeeared in manifest",
-			TagKeys:     append([]tag.Key{census.kProfiles}, baseTagsWithManifestID...),
+			TagKeys:     append([]tag.Key{census.kProfiles}, baseTagsWithOrchInfo...),
 			Aggregation: view.Distribution(0, .500, .75, 1.000, 1.500, 2.000, 2.500, 3.000, 3.500, 4.000, 4.500, 5.000, 10.000),
 		},
 		{
@@ -590,7 +587,7 @@ func InitCensus(nodeType NodeType, version string) {
 			Name:        "upload_time_seconds",
 			Measure:     census.mUploadTime,
 			Description: "UploadTime, seconds",
-			TagKeys:     append([]tag.Key{census.kOrchestratorURI}, baseTagsWithManifestID...),
+			TagKeys:     append([]tag.Key{census.kOrchestratorURI}, baseTags...),
 			Aggregation: view.Distribution(0, .10, .20, .50, .100, .150, .200, .500, .1000, .5000, 10.000),
 		},
 		{
@@ -632,7 +629,7 @@ func InitCensus(nodeType NodeType, version string) {
 			Name:        "discovery_errors_total",
 			Measure:     census.mDiscoveryError,
 			Description: "Number of discover errors",
-			TagKeys:     append([]tag.Key{census.kErrorCode, census.kOrchestratorURI}, baseTagsWithManifestID...),
+			TagKeys:     append([]tag.Key{census.kErrorCode, census.kOrchestratorURI}, baseTags...),
 			Aggregation: view.Count(),
 		},
 		{
@@ -705,13 +702,6 @@ func InitCensus(nodeType NodeType, version string) {
 			Measure:     census.mReserve,
 			Description: "Current remaining reserve for the broadcaster node",
 			TagKeys:     baseTagsWithEthAddr,
-			Aggregation: view.LastValue(),
-		},
-		{
-			Name:        "max_transcoding_price",
-			Measure:     census.mMaxTranscodingPrice,
-			Description: "Maximum price per pixel to pay for transcoding",
-			TagKeys:     baseTags,
 			Aggregation: view.LastValue(),
 		},
 
@@ -796,19 +786,28 @@ func InitCensus(nodeType NodeType, version string) {
 			Aggregation: view.LastValue(),
 		},
 
+		// Metrics for calling rewards
+		{
+			Name:        "reward_call_errors",
+			Measure:     census.mRewardCallError,
+			Description: "Errors when calling rewards",
+			TagKeys:     baseTags,
+			Aggregation: view.Sum(),
+		},
+
 		// Metrics for fast verification
 		{
 			Name:        "fast_verification_done",
 			Measure:     census.mFastVerificationDone,
 			Description: "Number of fast verifications done",
-			TagKeys:     baseTagsWithManifestID,
+			TagKeys:     append([]tag.Key{census.kOrchestratorURI}, baseTagsWithManifestID...),
 			Aggregation: view.Count(),
 		},
 		{
 			Name:        "fast_verification_failed",
 			Measure:     census.mFastVerificationFailed,
 			Description: "Number of fast verifications failed",
-			TagKeys:     baseTagsWithManifestID,
+			TagKeys:     append([]tag.Key{census.kOrchestratorURI, census.kFVErrorType}, baseTagsWithManifestID...),
 			Aggregation: view.Count(),
 		},
 		{
@@ -825,11 +824,27 @@ func InitCensus(nodeType NodeType, version string) {
 			TagKeys:     baseTags,
 			Aggregation: view.LastValue(),
 		},
+
+		// Metrics for scene classification
+		{
+			Name:        "segment_scene_class_prob",
+			Measure:     census.mSegmentClassProb,
+			Description: "Current segment scene class probability",
+			TagKeys:     append([]tag.Key{census.kSegClassName}, baseTagsWithManifestID...),
+			Aggregation: view.LastValue(),
+		},
+		{
+			Name:        "scene_classification_total_segments",
+			Measure:     census.mSceneClassification,
+			Description: "Total segments scene classification ran for",
+			TagKeys:     baseTags,
+			Aggregation: view.Count(),
+		},
 	}
 
 	// Register the views
 	if err := view.Register(views...); err != nil {
-		glog.Fatalf("Failed to register views: %v", err)
+		glog.Exitf("Failed to register views: %v", err)
 	}
 	registry := rprom.NewRegistry()
 	registry.MustRegister(rprom.NewProcessCollector(rprom.ProcessCollectorOpts{}))
@@ -839,7 +854,7 @@ func InitCensus(nodeType NodeType, version string) {
 		Registry:  registry,
 	})
 	if err != nil {
-		glog.Fatalf("Failed to create the Prometheus stats exporter: %v", err)
+		glog.Exitf("Failed to create the Prometheus stats exporter: %v", err)
 	}
 
 	// Register the Prometheus exporters as a stats exporter.
@@ -847,15 +862,17 @@ func InitCensus(nodeType NodeType, version string) {
 	stats.Record(ctx, mVersions.M(1))
 	ctx, err = tag.New(census.ctx, tag.Insert(census.kErrorCode, "LostSegment"))
 	if err != nil {
-		glog.Fatal("Error creating context", err)
+		glog.Exit("Error creating context", err)
 	}
 	if !unitTestMode {
 		go census.timeoutWatcher(ctx)
 	}
 	Exporter = pe
-
 	// init metrics values
 	SetTranscodersNumberAndLoad(0, 0, 0)
+	stats.Record(census.ctx, census.mWinningTicketsRecv.M(int64(0)))
+	stats.Record(census.ctx, census.mCurrentSessions.M(int64(0)))
+	stats.Record(census.ctx, census.mValueRedeemed.M(float64(0)))
 }
 
 /*
@@ -871,6 +888,18 @@ func manifestIDTag(ctx context.Context, others ...tag.Mutator) []tag.Mutator {
 	if PerStreamMetrics {
 		others = append(others, tag.Insert(census.kManifestID, clog.GetManifestID(ctx)))
 	}
+	return others
+}
+
+func manifestIDTagAndOrchInfo(orchInfo *lpnet.OrchestratorInfo, ctx context.Context, others ...tag.Mutator) []tag.Mutator {
+	others = manifestIDTag(ctx, others...)
+
+	others = append(
+		others,
+		tag.Insert(census.kOrchestratorURI, orchInfo.GetTranscoder()),
+		tag.Insert(census.kOrchestratorAddress, common.BytesToAddress(orchInfo.GetAddress()).String()),
+	)
+
 	return others
 }
 
@@ -899,15 +928,20 @@ func manifestIDTagAndIP(ctx context.Context, others ...tag.Mutator) []tag.Mutato
 func LogDiscoveryError(ctx context.Context, uri, code string) {
 	if strings.Contains(code, "OrchestratorCapped") {
 		code = "OrchestratorCapped"
+	} else if strings.Contains(code, "HTTP status code 404") {
+		code = "HTTP 404"
+	} else if strings.Contains(code, "DeadlineExceeded") || strings.Contains(code, "deadline") {
+		code = "DeadlineExceeded"
 	} else if strings.Contains(code, "Canceled") {
 		code = "Canceled"
 	}
-	if err := stats.RecordWithTags(census.ctx,
-		manifestIDTag(ctx,
-			tag.Insert(census.kErrorCode, code),
-			tag.Insert(census.kOrchestratorURI, uri)),
-		census.mDiscoveryError.M(1)); err != nil {
-		clog.Errorf(ctx, "Error recording metrics err=%q", err)
+	if code != "Canceled" {
+		if err := stats.RecordWithTags(census.ctx,
+			[]tag.Mutator{tag.Insert(census.kErrorCode, code),
+				tag.Insert(census.kOrchestratorURI, uri)},
+			census.mDiscoveryError.M(1)); err != nil {
+			clog.Errorf(ctx, "Error recording metrics err=%q", err)
+		}
 	}
 }
 
@@ -1128,7 +1162,6 @@ func SetTranscodersNumberAndLoad(load, capacity, number int) {
 }
 
 func SegmentEmerged(ctx context.Context, nonce, seqNo uint64, profilesNum int, dur float64) {
-	clog.V(logLevel).Infof(ctx, "Logging SegmentEmerged... duration=%v", dur)
 	if err := stats.RecordWithTags(census.ctx,
 		manifestIDTagAndIP(ctx),
 		census.mSegmentEmergedUnprocessed.M(1)); err != nil {
@@ -1155,7 +1188,6 @@ func (cen *censusMetricsCounter) segmentEmerged(nonce, seqNo uint64, profilesNum
 }
 
 func SourceSegmentAppeared(ctx context.Context, nonce, seqNo uint64, manifestID, profile string, recordingEnabled bool) {
-	clog.V(logLevel).Infof(ctx, "Logging SourceSegmentAppeared... profile=%s", profile)
 	census.segmentSourceAppeared(ctx, nonce, seqNo, profile, recordingEnabled)
 }
 
@@ -1174,24 +1206,40 @@ func (cen *censusMetricsCounter) segmentSourceAppeared(ctx context.Context, nonc
 }
 
 func SegmentUploaded(ctx context.Context, nonce, seqNo uint64, uploadDur time.Duration, uri string) {
-	clog.V(logLevel).Infof(ctx, "Logging SegmentUploaded... dur=%s", uploadDur)
-
 	if err := stats.RecordWithTags(census.ctx,
 		manifestIDTag(ctx,
 			tag.Insert(census.kOrchestratorURI, uri)),
-		census.mSegmentUploaded.M(1),
+		census.mSegmentUploaded.M(1)); err != nil {
+		clog.Errorf(ctx, "Error recording metrics err=%q", err)
+	}
+	if err := stats.RecordWithTags(census.ctx,
+		[]tag.Mutator{tag.Insert(census.kOrchestratorURI, uri)},
 		census.mUploadTime.M(uploadDur.Seconds())); err != nil {
 		clog.Errorf(ctx, "Error recording metrics err=%q", err)
 	}
 }
 
 func SegmentDownloaded(ctx context.Context, nonce, seqNo uint64, downloadDur time.Duration) {
-	clog.V(logLevel).Infof(ctx, "Logging SegmentDownloaded... dur=%s", downloadDur)
-
 	if err := stats.RecordWithTags(census.ctx,
 		manifestIDTag(ctx),
 		census.mSegmentDownloaded.M(1),
 		census.mDownloadTime.M(downloadDur.Seconds())); err != nil {
+		clog.Errorf(ctx, "Error recording metrics err=%q", err)
+	}
+}
+
+func SegSceneClassificationResult(ctx context.Context, seqNo uint64, class string, prob float64) {
+	if err := stats.RecordWithTags(census.ctx,
+		manifestIDTag(ctx, tag.Insert(census.kSegClassName, class)),
+		census.mSegmentClassProb.M(prob)); err != nil {
+		clog.Errorf(ctx, "Error recording metrics err=%q", err)
+	}
+}
+
+func SegSceneClassificationDone(ctx context.Context, seqNo uint64) {
+	if err := stats.RecordWithTags(census.ctx,
+		manifestIDTag(ctx),
+		census.mSceneClassification.M(1)); err != nil {
 		clog.Errorf(ctx, "Error recording metrics err=%q", err)
 	}
 }
@@ -1262,7 +1310,6 @@ func SegmentUploadFailed(ctx context.Context, nonce, seqNo uint64, code SegmentU
 			code = SegmentUploadErrorSessionEnded
 		}
 	}
-	clog.Errorf(ctx, "Logging SegmentUploadFailed... code=%v reason='%s'", code, err.Error())
 
 	census.segmentUploadFailed(ctx, nonce, seqNo, code, permanent, uri)
 }
@@ -1291,7 +1338,6 @@ func (cen *censusMetricsCounter) segmentUploadFailed(ctx context.Context, nonce,
 func SegmentTranscoded(ctx context.Context, nonce, seqNo uint64, sourceDur time.Duration, transcodeDur time.Duration, profiles string,
 	trusted, verified bool) {
 
-	clog.V(logLevel).Infof(ctx, "Logging SegmentTranscode nonce=%d seqNo=%d dur=%s trusted=%v verified=%v", nonce, seqNo, transcodeDur, trusted, verified)
 	census.segmentTranscoded(nonce, seqNo, sourceDur, transcodeDur, profiles, trusted, verified)
 }
 
@@ -1317,7 +1363,6 @@ func (cen *censusMetricsCounter) segmentTranscoded(nonce, seqNo uint64, sourceDu
 }
 
 func SegmentTranscodeFailed(ctx context.Context, subType SegmentTranscodeError, nonce, seqNo uint64, err error, permanent bool) {
-	clog.Errorf(ctx, "Logging SegmentTranscodeFailed subtype=%v err=%q", subType, err.Error())
 	census.segmentTranscodeFailed(ctx, nonce, seqNo, subType, permanent)
 }
 
@@ -1356,7 +1401,7 @@ func (cen *censusMetricsCounter) sendSuccess() {
 	stats.Record(cen.ctx, cen.mSuccessRate.M(cen.successRate()))
 }
 
-func SegmentFullyTranscoded(ctx context.Context, nonce, seqNo uint64, profiles string, errCode SegmentTranscodeError) {
+func SegmentFullyTranscoded(ctx context.Context, nonce, seqNo uint64, profiles string, errCode SegmentTranscodeError, orchInfo *lpnet.OrchestratorInfo) {
 	census.lock.Lock()
 	defer census.lock.Unlock()
 	rctx, err := tag.New(census.ctx, tag.Insert(census.kProfiles, profiles))
@@ -1369,7 +1414,7 @@ func SegmentFullyTranscoded(ctx context.Context, nonce, seqNo uint64, profiles s
 		if errCode == "" {
 			latency := time.Since(st)
 			if err := stats.RecordWithTags(rctx,
-				manifestIDTag(ctx), census.mTranscodeOverallLatency.M(latency.Seconds())); err != nil {
+				manifestIDTagAndOrchInfo(orchInfo, ctx), census.mTranscodeOverallLatency.M(latency.Seconds())); err != nil {
 				clog.Errorf(ctx, "Error recording metrics err=%q", err)
 			}
 		}
@@ -1377,7 +1422,7 @@ func SegmentFullyTranscoded(ctx context.Context, nonce, seqNo uint64, profiles s
 	}
 	if errCode == "" {
 		if err := stats.RecordWithTags(rctx,
-			manifestIDTag(ctx), census.mSegmentTranscodedAllAppeared.M(1)); err != nil {
+			manifestIDTagAndOrchInfo(orchInfo, ctx), census.mSegmentTranscodedAllAppeared.M(1)); err != nil {
 			clog.Errorf(ctx, "Error recording metrics err=%q", err)
 		}
 	}
@@ -1385,7 +1430,7 @@ func SegmentFullyTranscoded(ctx context.Context, nonce, seqNo uint64, profiles s
 	census.countSegmentTranscoded(nonce, seqNo, failed)
 	if !failed {
 		if err := stats.RecordWithTags(rctx,
-			manifestIDTag(ctx), census.mSegmentTranscodedUnprocessed.M(1)); err != nil {
+			manifestIDTagAndOrchInfo(orchInfo, ctx), census.mSegmentTranscodedUnprocessed.M(1)); err != nil {
 			clog.Errorf(ctx, "Error recording metrics err=%q", err)
 		}
 	}
@@ -1409,45 +1454,6 @@ func RecordingSegmentSaved(dur time.Duration, err error) {
 	}
 }
 
-func TranscodedSegmentAppeared(ctx context.Context, nonce, seqNo uint64, profile string, recordingEnabled bool) {
-	clog.V(logLevel).Infof(ctx, "Logging LogTranscodedSegmentAppeared... profile=%s", profile)
-	census.segmentTranscodedAppeared(ctx, nonce, seqNo, profile, recordingEnabled)
-}
-
-func (cen *censusMetricsCounter) segmentTranscodedAppeared(ctx context.Context, nonce, seqNo uint64, profile string, recordingEnabled bool) {
-	cen.lock.Lock()
-	defer cen.lock.Unlock()
-	rctx, err := tag.New(cen.ctx, tag.Insert(cen.kProfile, profile))
-	if err != nil {
-		glog.Error("Error creating context", err)
-		return
-	}
-
-	// cen.transcodedSegments[nonce] = cen.transcodedSegments[nonce] + 1
-	if st, ok := cen.emergeTimes[nonce][seqNo]; ok {
-		latency := time.Since(st)
-		clog.V(logLevel).Infof(ctx, "Recording latency for segment profile=%s latency=%s", profile, latency)
-		if err := stats.RecordWithTags(rctx,
-			manifestIDTag(ctx), cen.mTranscodeLatency.M(latency.Seconds())); err != nil {
-			clog.Errorf(ctx, "Error recording metrics err=%q", err)
-		}
-	}
-
-	segType := segTypeRegular
-	if recordingEnabled {
-		segType = segTypeRec
-	}
-	if err := stats.RecordWithTags(rctx,
-		manifestIDTag(ctx, tag.Insert(cen.kSegmentType, segType)), cen.mSegmentTranscodedAppeared.M(1)); err != nil {
-		clog.Errorf(ctx, "Error recording metrics err=%q", err)
-	}
-}
-
-func StreamCreateFailed(nonce uint64, reason string) {
-	glog.Errorf("Logging StreamCreateFailed... nonce=%d reason='%s'", nonce, reason)
-	stats.Record(census.ctx, census.mStreamCreateFailed.M(1))
-}
-
 func newAverager(manifestID string) *segmentsAverager {
 	return &segmentsAverager{
 		manifestID: manifestID,
@@ -1457,7 +1463,6 @@ func newAverager(manifestID string) *segmentsAverager {
 }
 
 func StreamCreated(manifestID string, nonce uint64) {
-	glog.V(logLevel).Infof("Logging StreamCreated... nonce=%d manifestID=%s", nonce, manifestID)
 	census.streamCreated(manifestID, nonce)
 }
 
@@ -1469,7 +1474,6 @@ func (cen *censusMetricsCounter) streamCreated(manifestID string, nonce uint64) 
 }
 
 func StreamStarted(nonce uint64) {
-	glog.V(logLevel).Infof("Logging StreamStarted... nonce=%d", nonce)
 	census.streamStarted(nonce)
 }
 
@@ -1478,7 +1482,6 @@ func (cen *censusMetricsCounter) streamStarted(nonce uint64) {
 }
 
 func StreamEnded(ctx context.Context, nonce uint64) {
-	clog.V(logLevel).Infof(ctx, "Logging StreamEnded... nonce=%d", nonce)
 	census.streamEnded(nonce)
 }
 
@@ -1681,6 +1684,16 @@ func TranscodingPrice(sender string, price *big.Rat) {
 	}
 }
 
+// RewardCallError records an error from reward calling
+func RewardCallError(sender string) {
+	if err := stats.RecordWithTags(census.ctx,
+		[]tag.Mutator{tag.Insert(census.kSender, sender)},
+		census.mRewardCallError.M(1)); err != nil {
+
+		glog.Errorf("Error recording metrics err=%q", err)
+	}
+}
+
 // Convert wei to gwei
 func wei2gwei(wei *big.Int) float64 {
 	gwei, _ := new(big.Float).Quo(new(big.Float).SetInt(wei), big.NewFloat(float64(gweiConversionFactor))).Float64()
@@ -1693,16 +1706,19 @@ func fracwei2gwei(wei *big.Rat) float64 {
 	return floatWei / gweiConversionFactor
 }
 
-func FastVerificationDone(ctx context.Context) {
+func FastVerificationDone(ctx context.Context, uri string) {
 	if err := stats.RecordWithTags(census.ctx,
-		manifestIDTag(ctx), census.mFastVerificationDone.M(1)); err != nil {
+		manifestIDTag(ctx, tag.Insert(census.kOrchestratorURI, uri)),
+		census.mFastVerificationDone.M(1)); err != nil {
 		clog.Errorf(ctx, "Error recording metrics err=%q", err)
 	}
 }
 
-func FastVerificationFailed(ctx context.Context) {
+func FastVerificationFailed(ctx context.Context, uri string, errtype int) {
+	serrtype := strconv.Itoa(errtype)
 	if err := stats.RecordWithTags(census.ctx,
-		manifestIDTag(ctx), census.mFastVerificationFailed.M(1)); err != nil {
+		manifestIDTag(ctx, tag.Insert(census.kOrchestratorURI, uri), tag.Insert(census.kFVErrorType, serrtype)),
+		census.mFastVerificationFailed.M(1)); err != nil {
 		clog.Errorf(ctx, "Error recording metrics err=%q", err)
 	}
 }

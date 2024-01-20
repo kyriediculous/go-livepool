@@ -10,7 +10,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/livepeer/go-livepeer/common"
-	"github.com/livepeer/go-livepeer/drivers"
+	"github.com/livepeer/go-tools/drivers"
 	ffmpeg "github.com/livepeer/lpms/ffmpeg"
 	"github.com/livepeer/m3u8"
 )
@@ -26,7 +26,7 @@ const (
 
 var JsonPlaylistQuitTimeout = 60 * time.Second
 
-//	PlaylistManager manages playlists and data for one video stream, backed by one object storage.
+// PlaylistManager manages playlists and data for one video stream, backed by one object storage.
 type PlaylistManager interface {
 	ManifestID() ManifestID
 	// Implicitly creates master and media playlists

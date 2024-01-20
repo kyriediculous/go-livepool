@@ -2,17 +2,69 @@ package core
 
 import (
 	"context"
+	"io"
 	"sort"
 	"testing"
 	"time"
 
-	"github.com/livepeer/go-livepeer/drivers"
+	"github.com/livepeer/go-livepeer/common"
 	"github.com/livepeer/go-livepeer/net"
+	"github.com/livepeer/go-tools/drivers"
 	"github.com/livepeer/lpms/ffmpeg"
 
 	"github.com/stretchr/testify/assert"
 	"pgregory.net/rapid"
 )
+
+func TestCapability_Capacities(t *testing.T) {
+	assert := assert.New(t)
+	// create capabilities
+	capabilities := []Capability{128, 2, 3}
+	mandatory := []Capability{4}
+	caps := NewCapabilities(capabilities, mandatory)
+	// convert to net.Capabilities and back
+	caps = CapabilitiesFromNetCapabilities(caps.ToNetCapabilities())
+	// check all capacities present and set to 1
+	assert.Equal(len(caps.capacities), len(capabilities))
+	for _, c := range capabilities {
+		v, exist := caps.capacities[c]
+		assert.True(exist)
+		assert.Equal(1, v)
+	}
+	// test increase capacity
+	newCaps := NewCapabilities([]Capability{2, 3, 5}, mandatory)
+	newCaps.capacities[2] = 2
+	newCaps.capacities[5] = 2
+	caps.AddCapacity(newCaps)
+	assert.Equal(3, caps.capacities[2])
+	assert.Equal(2, caps.capacities[5])
+	// check new capability appeared in bitstring
+	assert.True(caps.bitstring[0]&uint64(1<<5) > 0)
+	// test decrease capacity
+	caps.RemoveCapacity(newCaps)
+	assert.Equal(1, caps.capacities[2])
+	// check new cap is gone from capacities and bitstring
+	_, exists := caps.capacities[5]
+	assert.False(exists)
+	assert.True(caps.bitstring[0]&uint64(1<<5) == 0)
+	// decrease again and check only capability 1 left
+	caps.RemoveCapacity(newCaps)
+	assert.Equal(1, len(caps.capacities))
+	assert.Equal(1, caps.capacities[128])
+	assert.True(caps.bitstring[0] == 0)
+	assert.True(caps.bitstring[1] == 0)
+	assert.True(caps.bitstring[2] == 1)
+	// check compatibility
+	caps = NewCapabilities(capabilities, mandatory)
+	netCapsLegacy := caps.ToNetCapabilities()
+	netCapsLegacy.Capacities = nil
+	legacyCaps := CapabilitiesFromNetCapabilities(netCapsLegacy)
+	for _, c := range capabilities {
+		v, exist := legacyCaps.capacities[c]
+		assert.True(exist)
+		assert.Equal(1, v)
+	}
+}
 
 func TestCapability_NewString(t *testing.T) {
 	assert := assert.New(t)
@@ -40,22 +92,22 @@ func TestCapability_CompatibleBitstring(t *testing.T) {
 		assert := assert.New(t) // in order to pick up the rapid rng
 
 		// generate initial list of caps
-		nbCaps := rapid.IntRange(0, 512).Draw(t, "nbCaps").(int)
+		nbCaps := rapid.IntRange(0, 512).Draw(t, "nbCaps")
 		isSet := rapid.IntRange(0, 1)
 		caps := []Capability{}
 		for i := 0; i < nbCaps; i++ {
-			if 1 == isSet.Draw(t, "isSet").(int) {
+			if 1 == isSet.Draw(t, "isSet") {
 				caps = append(caps, Capability(i))
 			}
 		}
 
 		// generate a subset of caps
-		reductionSz := rapid.IntRange(0, len(caps)).Draw(t, "reductionSz").(int)
+		reductionSz := rapid.IntRange(0, len(caps)).Draw(t, "reductionSz")
 		subsetCaps := make([]Capability, len(caps))
 		copy(subsetCaps, caps)
 		for i := 0; i < reductionSz; i++ {
 			// select an index k, and remove it
-			k := rapid.IntRange(0, len(subsetCaps)-1).Draw(t, "k").(int)
+			k := rapid.IntRange(0, len(subsetCaps)-1).Draw(t, "k")
 			subsetCaps[k] = subsetCaps[len(subsetCaps)-1]
 			subsetCaps = subsetCaps[:len(subsetCaps)-1]
 		}
@@ -76,6 +128,44 @@ func TestCapability_CompatibleBitstring(t *testing.T) {
 	})
 }
 
+// We need this in order to call `NvidiaTranscoder::Transcode()` properly
+func setupWorkDir(t *testing.T) (string, func()) {
+	tmp := t.TempDir()
+	WorkDir = tmp
+	cleanup := func() {
+		WorkDir = ""
+	}
+	return tmp, cleanup
+}
+
+func TestCapability_TranscoderCapabilities(t *testing.T) {
+	tmpdir, cleanup := setupWorkDir(t)
+	defer cleanup()
+
+	// nvidia test
+	devices, err := common.ParseAccelDevices("all", ffmpeg.Nvidia)
+	devicesAvailable := err == nil && len(devices) > 0
+	if devicesAvailable {
+		nvidiaCaps, err := TestTranscoderCapabilities(devices, NewNvidiaTranscoder)
+		assert.Nil(t, err)
+		assert.False(t, InArray(Capability_H264_Decode_444_8bit, nvidiaCaps), "Nvidia device should not support decode of 444_8bit")
+		assert.False(t, InArray(Capability_H264_Decode_422_8bit, nvidiaCaps), "Nvidia device should not support decode of 422_8bit")
+		assert.False(t, InArray(Capability_H264_Decode_444_10bit, nvidiaCaps), "Nvidia device should not support decode of 444_10bit")
+		assert.False(t, InArray(Capability_H264_Decode_422_10bit, nvidiaCaps), "Nvidia device should not support decode of 422_10bit")
+		assert.False(t, InArray(Capability_H264_Decode_420_10bit, nvidiaCaps), "Nvidia device should not support decode of 420_10bit")
+	}
+
+	// Same test with software transcoder:
+	softwareCaps, err := TestSoftwareTranscoderCapabilities(tmpdir)
+	assert.Nil(t, err)
+	// Software transcoder supports: [h264_444_8bit h264_422_8bit h264_444_10bit h264_422_10bit h264_420_10bit]
+	assert.True(t, InArray(Capability_H264_Decode_444_8bit, softwareCaps), "software decoder should support 444_8bit input")
+	assert.True(t, InArray(Capability_H264_Decode_422_8bit, softwareCaps), "software decoder should support 422_8bit input")
+	assert.True(t, InArray(Capability_H264_Decode_444_10bit, softwareCaps), "software decoder should support 444_10bit input")
+	assert.True(t, InArray(Capability_H264_Decode_422_10bit, softwareCaps), "software decoder should support 422_10bit input")
+	assert.True(t, InArray(Capability_H264_Decode_420_10bit, softwareCaps), "software decoder should support 420_10bit input")
+}
+
 func TestCapability_JobCapabilities(t *testing.T) {
 	assert := assert.New(t)
 
@@ -93,12 +183,35 @@ func TestCapability_JobCapabilities(t *testing.T) {
 	// Use a rapid check to facilitate this.
 
 	checkSuccess := func(params *StreamParameters, caps []Capability) bool {
-		jobCaps, err := JobCapabilities(params)
+		jobCaps, err := JobCapabilities(params, nil)
 		ret := assert.Nil(err)
 		expectedCaps := &Capabilities{bitstring: NewCapabilityString(caps)}
 		ret = assert.Equal(expectedCaps, jobCaps) && ret
 		return ret
 	}
+
+	checkPixelFormat := func(constValue int, expected []Capability) bool {
+		streamParams := &StreamParameters{Codec: ffmpeg.H264, PixelFormat: ffmpeg.PixelFormat{RawValue: constValue}}
+		jobCaps, err := JobCapabilities(streamParams, nil)
+		ret := assert.Nil(err)
+		expectedCaps := &Capabilities{bitstring: NewCapabilityString(expected)}
+		ret = assert.Equal(jobCaps, expectedCaps, "failed decode capability check") && ret
+		return ret
+	}
+	// Capability_AuthToken appears to be mandatory
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatYUV420P, []Capability{Capability_AuthToken, Capability_H264}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatYUYV422, []Capability{Capability_AuthToken, Capability_H264, Capability_H264_Decode_422_8bit}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatYUV422P, []Capability{Capability_AuthToken, Capability_H264, Capability_H264_Decode_422_8bit}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatYUV444P, []Capability{Capability_AuthToken, Capability_H264, Capability_H264_Decode_444_8bit}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatUYVY422, []Capability{Capability_AuthToken, Capability_H264, Capability_H264_Decode_422_8bit}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatNV12, []Capability{Capability_AuthToken, Capability_H264}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatNV21, []Capability{Capability_AuthToken, Capability_H264}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatYUV420P10BE, []Capability{Capability_AuthToken, Capability_H264, Capability_H264_Decode_420_10bit}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatYUV420P10LE, []Capability{Capability_AuthToken, Capability_H264, Capability_H264_Decode_420_10bit}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatYUV422P10BE, []Capability{Capability_AuthToken, Capability_H264, Capability_H264_Decode_422_10bit}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatYUV422P10LE, []Capability{Capability_AuthToken, Capability_H264, Capability_H264_Decode_422_10bit}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatYUV444P10BE, []Capability{Capability_AuthToken, Capability_H264, Capability_H264_Decode_444_10bit}))
+	assert.True(checkPixelFormat(ffmpeg.PixelFormatYUV444P10LE, []Capability{Capability_AuthToken, Capability_H264, Capability_H264_Decode_444_10bit}))
 
 	// check with everything empty
 	assert.True(checkSuccess(&StreamParameters{}, []Capability{
@@ -115,14 +228,10 @@ func TestCapability_JobCapabilities(t *testing.T) {
 		{Profile: ffmpeg.ProfileH264High},
 		{GOP: 1},
 	}
-	detector := DetectionConfig{
-		Freq:     1,
-		Profiles: []ffmpeg.DetectorProfile{&ffmpeg.SceneClassificationProfile{}},
-	}
 	storageURI := "s3+http://K:P@localhost:9000/bucket"
 	os, err := drivers.ParseOSURL(storageURI, false)
 	assert.Nil(err)
-	params := &StreamParameters{Profiles: profs, OS: os.NewSession(""), Detection: detector}
+	params := &StreamParameters{Profiles: profs, OS: os.NewSession("")}
 	assert.True(checkSuccess(params, []Capability{
 		Capability_H264,
 		Capability_MP4,
@@ -133,13 +242,11 @@ func TestCapability_JobCapabilities(t *testing.T) {
 		Capability_ProfileH264High,
 		Capability_GOP,
 		Capability_AuthToken,
-		Capability_SceneClassification,
 	}), "failed with everything enabled")
 
 	// check fractional framerates
 	params.Profiles = []ffmpeg.VideoProfile{{FramerateDen: 1}}
 	params.OS = nil
-	params.Detection = DetectionConfig{}
 	assert.True(checkSuccess(params, []Capability{
 		Capability_H264,
 		Capability_MPEGTS,
@@ -159,18 +266,18 @@ func TestCapability_JobCapabilities(t *testing.T) {
 
 	// check error case with format
 	params.Profiles = []ffmpeg.VideoProfile{{Format: -1}}
-	_, err = JobCapabilities(params)
+	_, err = JobCapabilities(params, nil)
 	assert.Equal(capFormatConv, err)
 
 	// check error case with profiles
 	params.Profiles = []ffmpeg.VideoProfile{{Profile: -1}}
-	_, err = JobCapabilities(params)
+	_, err = JobCapabilities(params, nil)
 	assert.Equal(capProfileConv, err)
 
 	// check error case with storage
 	params.Profiles = nil
 	params.OS = &stubOS{storageType: -1}
-	_, err = JobCapabilities(params)
+	_, err = JobCapabilities(params, nil)
 	assert.Equal(capStorageConv, err)
 }
 
@@ -236,11 +343,11 @@ func TestCapability_RoundTrip_Net(t *testing.T) {
 		assert := assert.New(t) // in order to pick up the rapid rng
 
 		makeCapList := func() []Capability {
-			randCapsLen := rapid.IntRange(0, 256).Draw(t, "capLen").(int)
+			randCapsLen := rapid.IntRange(0, 256).Draw(t, "capLen")
 			randCaps := rapid.IntRange(0, 512)
 			capList := []Capability{}
 			for i := 0; i < randCapsLen; i++ {
-				capList = append(capList, Capability(randCaps.Draw(t, "cap").(int)))
+				capList = append(capList, Capability(randCaps.Draw(t, "cap")))
 			}
 			return capList
 		}
@@ -275,14 +382,14 @@ type stubOS struct {
 	storageType int32
 }
 
-func (os *stubOS) GetInfo() *net.OSInfo {
+func (os *stubOS) GetInfo() *drivers.OSInfo {
 	if os.storageType == stubOSMagic {
 		return nil
 	}
-	return &net.OSInfo{StorageType: net.OSInfo_StorageType(os.storageType)}
+	return &drivers.OSInfo{StorageType: drivers.OSInfo_StorageType(os.storageType)}
 }
 func (os *stubOS) EndSession() {}
-func (os *stubOS) SaveData(context.Context, string, []byte, map[string]string, time.Duration) (string, error) {
+func (os *stubOS) SaveData(context.Context, string, io.Reader, map[string]string, time.Duration) (string, error) {
 	return "", nil
 }
 func (os *stubOS) IsExternal() bool      { return false }

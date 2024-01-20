@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -62,9 +62,13 @@ func (w *wizard) getRegisteredOrchestrators() ([]lpTypes.Transcoder, error) {
 		return nil, err
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("http error: %d", resp.StatusCode)
+	}
+
 	defer resp.Body.Close()
 
-	result, err := ioutil.ReadAll(resp.Body)
+	result, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +131,7 @@ func (w *wizard) getUnbondingLocks(withdrawable bool) ([]lpcommon.DBUnbondingLoc
 
 	defer resp.Body.Close()
 
-	result, err := ioutil.ReadAll(resp.Body)
+	result, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -165,8 +169,7 @@ func (w *wizard) bond() {
 
 	amount := big.NewInt(0)
 	for amount.Cmp(big.NewInt(0)) == 0 || balBigInt.Cmp(amount) < 0 {
-		fmt.Printf("Enter bond amount - ")
-		amount = w.readBigInt()
+		amount = w.readBigInt("Enter bond amount")
 		if amount.Cmp(big.NewInt(0)) == 0 {
 			break
 		}
@@ -277,8 +280,7 @@ func (w *wizard) unbond() {
 	}
 
 	for amount.Cmp(big.NewInt(0)) == 0 || dInfo.BondedAmount.Cmp(amount) < 0 {
-		fmt.Printf("Enter unbond amount - ")
-		amount = w.readBigInt()
+		amount = w.readBigInt("Enter unbond amount")
 		if dInfo.BondedAmount.Cmp(amount) < 0 {
 			fmt.Printf("Must enter an amount less than or equal to the current bonded amount.")
 		}

@@ -3,10 +3,12 @@ package discovery
 import (
 	"container/heap"
 	"context"
+	"encoding/hex"
 	"errors"
 	"math"
 	"math/rand"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/livepeer/go-livepeer/clog"
@@ -20,16 +22,18 @@ import (
 
 var getOrchestratorsTimeoutLoop = 3 * time.Second
 var getOrchestratorsCutoffTimeout = 500 * time.Millisecond
+var maxGetOrchestratorCutoffTimeout = 6 * time.Second
 
 var serverGetOrchInfo = server.GetOrchestratorInfo
 
 type orchestratorPool struct {
-	infos []common.OrchestratorLocalInfo
-	pred  func(info *net.OrchestratorInfo) bool
-	bcast common.Broadcaster
+	infos         []common.OrchestratorLocalInfo
+	pred          func(info *net.OrchestratorInfo) bool
+	bcast         common.Broadcaster
+	orchBlacklist []string
 }
 
-func NewOrchestratorPool(bcast common.Broadcaster, uris []*url.URL, score float32) *orchestratorPool {
+func NewOrchestratorPool(bcast common.Broadcaster, uris []*url.URL, score float32, orchBlacklist []string) *orchestratorPool {
 	if len(uris) <= 0 {
 		// Should we return here?
 		glog.Error("Orchestrator pool does not have any URIs")
@@ -38,14 +42,13 @@ func NewOrchestratorPool(bcast common.Broadcaster, uris []*url.URL, score float3
 	for _, uri := range uris {
 		infos = append(infos, common.OrchestratorLocalInfo{URL: uri, Score: score})
 	}
-
-	return &orchestratorPool{infos: infos, bcast: bcast}
+	return &orchestratorPool{infos: infos, bcast: bcast, orchBlacklist: orchBlacklist}
 }
 
 func NewOrchestratorPoolWithPred(bcast common.Broadcaster, addresses []*url.URL,
-	pred func(*net.OrchestratorInfo) bool, score float32) *orchestratorPool {
+	pred func(*net.OrchestratorInfo) bool, score float32, orchBlacklist []string) *orchestratorPool {
 
-	pool := NewOrchestratorPool(bcast, addresses, score)
+	pool := NewOrchestratorPool(bcast, addresses, score, orchBlacklist)
 	pool.pred = pred
 	return pool
 }
@@ -54,33 +57,18 @@ func (o *orchestratorPool) GetInfos() []common.OrchestratorLocalInfo {
 	return o.infos
 }
 
-func (o *orchestratorPool) GetInfo(uri string) common.OrchestratorLocalInfo {
-	var res common.OrchestratorLocalInfo
-	for _, info := range o.infos {
-		if info.URL.String() == uri {
-			res = info
-			break
-		}
-	}
-	return res
-}
-
 func (o *orchestratorPool) GetOrchestrators(ctx context.Context, numOrchestrators int, suspender common.Suspender, caps common.CapabilityComparator,
-	scorePred common.ScorePred) ([]*net.OrchestratorInfo, error) {
+	scorePred common.ScorePred) (common.OrchestratorDescriptors, error) {
 
-	linfos := make([]common.OrchestratorLocalInfo, 0, len(o.infos))
-	for _, info := range o.infos {
-		if scorePred(info.Score) {
-			linfos = append(linfos, info)
+	linfos := make([]*common.OrchestratorLocalInfo, 0, len(o.infos))
+	for i, _ := range o.infos {
+		if scorePred(o.infos[i].Score) {
+			linfos = append(linfos, &o.infos[i])
 		}
 	}
 
 	numAvailableOrchs := len(linfos)
 	numOrchestrators = int(math.Min(float64(numAvailableOrchs), float64(numOrchestrators)))
-	ctx, cancel := context.WithTimeout(clog.Clone(context.Background(), ctx), getOrchestratorsCutoffTimeout)
-
-	infoCh := make(chan *net.OrchestratorInfo, numAvailableOrchs)
-	errCh := make(chan error, numAvailableOrchs)
 
 	// The following allows us to avoid capability check for jobs that only
 	// depend on "legacy" features, since older orchestrators support these
@@ -92,6 +80,15 @@ func (o *orchestratorPool) GetOrchestrators(ctx context.Context, numOrchestrator
 	// orchestrators, then we can probably remove this check and work with
 	// the assumption that all orchestrators support capability discovery.
 	legacyCapsOnly := caps.LegacyOnly()
+
+	isBlacklisted := func(info *net.OrchestratorInfo) bool {
+		for _, blacklisted := range o.orchBlacklist {
+			if strings.TrimPrefix(blacklisted, "0x") == strings.ToLower(hex.EncodeToString(info.Address)) {
+				return true
+			}
+		}
+		return false
+	}
 
 	isCompatible := func(info *net.OrchestratorInfo) bool {
 		if o.pred != nil && !o.pred(info) {
@@ -108,63 +105,81 @@ func (o *orchestratorPool) GetOrchestrators(ctx context.Context, numOrchestrator
 		}
 		return caps.CompatibleWith(info.Capabilities)
 	}
-	getOrchInfo := func(uri *url.URL) {
-		info, err := serverGetOrchInfo(ctx, o.bcast, uri)
-		if err == nil && isCompatible(info) {
-			infoCh <- info
+	getOrchInfo := func(ctx context.Context, od common.OrchestratorDescriptor, infoCh chan common.OrchestratorDescriptor, errCh chan error) {
+		info, err := serverGetOrchInfo(ctx, o.bcast, od.LocalInfo.URL)
+		if err == nil && !isBlacklisted(info) && isCompatible(info) {
+			od.RemoteInfo = info
+			infoCh <- od
 			return
 		}
 		if err != nil && !errors.Is(err, context.Canceled) {
-			clog.Errorf(ctx, "err=%q", err)
+			clog.V(common.DEBUG).Infof(ctx, "err=%q", err)
 			if monitor.Enabled {
-				monitor.LogDiscoveryError(ctx, uri.String(), err.Error())
+				monitor.LogDiscoveryError(ctx, od.LocalInfo.URL.String(), err.Error())
 			}
 		}
 		errCh <- err
 	}
 
-	// Shuffle into new slice to avoid mutating underlying data
-	uris := make([]*url.URL, numAvailableOrchs)
-	for i, j := range rand.Perm(numAvailableOrchs) {
-		uris[i] = linfos[j].URL
-	}
-
-	for _, uri := range uris {
-		go getOrchInfo(uri)
-	}
-
-	timeout := false
-	infos := []*net.OrchestratorInfo{}
+	var ods common.OrchestratorDescriptors
 	suspendedInfos := newSuspensionQueue()
+	timedOut := false
 	nbResp := 0
-	for i := 0; i < numAvailableOrchs && len(infos) < numOrchestrators && !timeout; i++ {
+	odCh := make(chan common.OrchestratorDescriptor, numAvailableOrchs)
+	errCh := make(chan error, numAvailableOrchs)
+
+	ctx, cancel := context.WithTimeout(clog.Clone(context.Background(), ctx), maxGetOrchestratorCutoffTimeout)
+
+	// Shuffle and create O descriptor
+	for _, i := range rand.Perm(numAvailableOrchs) {
+		go getOrchInfo(ctx, common.OrchestratorDescriptor{linfos[i], nil}, odCh, errCh)
+	}
+
+	// try to wait for orchestrators until at least 1 is found (with the exponential backoff timout)
+	timeout := getOrchestratorsCutoffTimeout
+	timer := time.NewTimer(timeout)
+
+	for nbResp < numAvailableOrchs && len(ods) < numOrchestrators && !timedOut {
 		select {
-		case info := <-infoCh:
-			if penalty := suspender.Suspended(info.Transcoder); penalty == 0 {
-				infos = append(infos, info)
+		case od := <-odCh:
+			if penalty := suspender.Suspended(od.RemoteInfo.Transcoder); penalty == 0 {
+				ods = append(ods, od)
 			} else {
-				heap.Push(suspendedInfos, &suspension{info, penalty})
+				heap.Push(suspendedInfos, &suspension{od.RemoteInfo, &od, penalty})
 			}
 			nbResp++
 		case <-errCh:
 			nbResp++
+		case <-timer.C:
+			if len(ods) > 0 {
+				timedOut = true
+			}
+
+			// At this point we already waited timeout, so need to wait another timeout to make it the increased 2 * timeout
+			timer.Reset(timeout)
+			timeout *= 2
+			if timeout > maxGetOrchestratorCutoffTimeout {
+				timeout = maxGetOrchestratorCutoffTimeout
+			}
+			clog.V(common.DEBUG).Infof(ctx, "No orchestrators found, increasing discovery timeout to %s", timeout)
 		case <-ctx.Done():
-			timeout = true
+			timedOut = true
 		}
 	}
 	cancel()
 
-	if len(infos) < numOrchestrators {
-		diff := numOrchestrators - len(infos)
+	// consider suspended orchestrators if we have an insufficient number of non-suspended ones
+	if len(ods) < numOrchestrators {
+		diff := numOrchestrators - len(ods)
 		for i := 0; i < diff && suspendedInfos.Len() > 0; i++ {
-			info := heap.Pop(suspendedInfos).(*suspension).orch
-			infos = append(infos, info)
+			od := heap.Pop(suspendedInfos).(*suspension).od
+			ods = append(ods, *od)
 		}
 	}
 
-	clog.Infof(ctx, "Done fetching orch info numOrch=%d responses=%d/%d timeout=%t",
-		len(infos), nbResp, len(uris), timeout)
-	return infos, nil
+	clog.Infof(ctx, "Done fetching orch info numOrch=%d responses=%d/%d timedOut=%t",
+		len(ods), nbResp, len(linfos), timedOut)
+	return ods, nil
 }
 
 func (o *orchestratorPool) Size() int {

@@ -13,7 +13,7 @@
 The Livepeer project aims to deliver a live video-streaming network protocol
 that is fully decentralized, highly scalable and crypto-token incentivized to
 serve as the live media layer in the decentralized development (Web3) stack.
-[Read our documentation](https://docs.livepeer.org/protocol/overview) to learn more about the protocol and its economic incentives.
+[Read our documentation](https://docs.livepeer.org/protocol/) to learn more about the protocol and its economic incentives.
 
 `go-livepeer` is a Go implementation of the [Livepeer](https://livepeer.org) protocol which powers the Livepeer Network. Specifically, `go-livepeer` contains implementations of Broadcaster, Orchestrator, and Transcoder nodes (roles) in the Livepeer Network ecosystem.
 
@@ -38,13 +38,13 @@ This project requires `go` and a unix shell.
 
 ## Getting Started
 
-To get started, clone the repo and follow the [installation guide](https://docs.livepeer.org/installation/install-livepeer/installing-for-development#build-and-install).
+To get started, clone the repo and follow the [installation guide](https://docs.livepeer.org/guides/orchestrating/install-go-livepeer).
 
 Next, follow [the guide to set up a private ETH network with the Livepeer protocol deployed](cmd/devtool/README.md).
 
 ## Contributing
 
-Thanks for your interest in contributing to go-livepeer. There are many ways you can contribute to the project, even non-developers.
+Thanks for your interest in contributing to go-livepeer. There are many ways you can contribute to the project, even for non-developers.
 
 To start, take a few minutes to **[read the "Contributing to go-livepeer" guide](CONTRIBUTING.md)**.
 

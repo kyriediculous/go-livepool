@@ -63,9 +63,33 @@ func (m *MockClient) GetTranscoderPoolMaxSize() (*big.Int, error) {
 	return mockBigInt(args, 0), args.Error(1)
 }
 
-func (m *MockClient) GetTranscoder(address common.Address) (*lpTypes.Transcoder, error) {
-	args := m.Called()
-	return args.Get(0).(*lpTypes.Transcoder), args.Error(1)
+func (m *MockClient) GetTranscoder(addr common.Address) (*lpTypes.Transcoder, error) {
+	args := m.Called(addr)
+	arg := args.Get(0)
+	err := args.Error(1)
+
+	if arg == nil {
+		return nil, err
+	}
+
+	return arg.(*lpTypes.Transcoder), err
+}
+
+func (m *MockClient) GetDelegator(addr common.Address) (*lpTypes.Delegator, error) {
+	args := m.Called(addr)
+	arg := args.Get(0)
+	err := args.Error(1)
+
+	if arg == nil {
+		return nil, err
+	}
+
+	return arg.(*lpTypes.Delegator), err
+}
+
+func (m *MockClient) GetServiceURI(addr common.Address) (string, error) {
+	args := m.Called(addr)
+	return args.Get(0).(string), args.Error(1)
 }
 
 func (m *MockClient) IsActiveTranscoder() (bool, error) {
@@ -99,6 +123,12 @@ func (m *MockClient) CurrentRound() (*big.Int, error) {
 
 // CurrentRoundInitialized returns whether the current round is initialized
 func (m *MockClient) CurrentRoundInitialized() (bool, error) {
+	args := m.Called()
+	return args.Bool(0), args.Error(1)
+}
+
+// CurrentRoundLocked returns whether the current round is locked
+func (m *MockClient) CurrentRoundLocked() (bool, error) {
 	args := m.Called()
 	return args.Bool(0), args.Error(1)
 }
@@ -205,6 +235,7 @@ func (m *MockClient) ReplaceTransaction(tx *types.Transaction, method string, ga
 func (m *MockClient) Vote(pollAddr ethcommon.Address, choiceID *big.Int) (*types.Transaction, error) {
 	args := m.Called()
 	return mockTransaction(args, 0), args.Error(1)
+	return mockTransaction(args, 0), args.Error(1)
 }
 
 type StubClient struct {
@@ -212,6 +243,7 @@ type StubClient struct {
 	TranscoderAddress            common.Address
 	BlockNum                     *big.Int
 	BlockHashToReturn            common.Hash
+	BlockHashForRoundMap         map[int64]common.Hash
 	ProcessHistoricalUnbondError error
 	Orchestrators                []*lpTypes.Transcoder
 	Round                        *big.Int
@@ -247,6 +279,11 @@ func (e *StubClient) LastInitializedRound() (*big.Int, error) {
 	return e.Round, e.Errors["LastInitializedRound"]
 }
 func (e *StubClient) BlockHashForRound(round *big.Int) ([32]byte, error) {
+	if e.BlockHashForRoundMap != nil {
+		if hash, ok := e.BlockHashForRoundMap[round.Int64()]; ok {
+			return hash, nil
+		}
+	}
 	return e.BlockHashToReturn, e.Errors["BlockHashForRound"]
 }
 func (e *StubClient) CurrentRoundInitialized() (bool, error) { return false, nil }
@@ -318,11 +355,7 @@ func (e *StubClient) GetTranscoderEarningsPoolForRound(addr common.Address, roun
 		return &lpTypes.TokenPools{}, e.TranscoderPoolError
 	}
 
-	totalStake := big.NewInt(0)
-	if e.TotalStake != nil {
-		totalStake = e.TotalStake
-	}
-	return &lpTypes.TokenPools{TotalStake: totalStake}, nil
+	return &lpTypes.TokenPools{TotalStake: e.TotalStake}, nil
 }
 func (e *StubClient) TranscoderPool() ([]*lpTypes.Transcoder, error) {
 	return e.Orchestrators, e.TranscoderPoolError
@@ -386,10 +419,13 @@ func (c *StubClient) UnbondingPeriod() (uint64, error)            { return 0, ni
 func (c *StubClient) Inflation() (*big.Int, error)                { return big.NewInt(0), nil }
 func (c *StubClient) InflationChange() (*big.Int, error)          { return big.NewInt(0), nil }
 func (c *StubClient) TargetBondingRate() (*big.Int, error)        { return big.NewInt(0), nil }
+func (c *StubClient) GetGlobalTotalSupply() (*big.Int, error)     { return big.NewInt(0), nil }
 
 // Helpers
 
-func (c *StubClient) ContractAddresses() map[string]common.Address { return nil }
+func (c *StubClient) ContractAddresses() map[string]common.Address {
+	return map[string]common.Address{}
+}
 func (c *StubClient) CheckTx(tx *types.Transaction) error {
 	return c.CheckTxErr
 }

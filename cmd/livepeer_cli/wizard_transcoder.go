@@ -28,6 +28,11 @@ func (w *wizard) isOrchestrator() bool {
 	return isT == "true"
 }
 
+func (w *wizard) isRedeemer() bool {
+	isT := httpGet(fmt.Sprintf("http://%v:%v/IsRedeemer", w.host, w.httpPort))
+	return isT == "true"
+}
+
 func myHostPort() string {
 	// TODO Fall back to try other services if this one fails. Ask a peer?
 	// 	http://myexternalip.com
@@ -35,13 +40,14 @@ func myHostPort() string {
 	// 	http://whatismyipaddress.com/api
 	// 	http://ipinfo.io/ip
 	ip := strings.TrimSpace(httpGet("https://api.ipify.org/?format=text"))
-	return ip + ":" + defaultRPCPort
+	return "https://" + ip + ":" + defaultRPCPort
 }
 
 func (w *wizard) promptOrchestratorConfig() (float64, float64, int, int, string) {
 	var (
 		blockRewardCut float64
 		feeCut         float64
+		addr           string
 	)
 
 	orch, _, err := w.getOrchestratorInfo()
@@ -53,10 +59,10 @@ func (w *wizard) promptOrchestratorConfig() (float64, float64, int, int, string)
 	}
 
 	fmt.Printf("Enter block reward cut percentage (current=%v default=%v) - ", blockRewardCut, defaultRewardCut)
-	blockRewardCut = w.readDefaultFloat(blockRewardCut)
+	blockRewardCut = w.readDefaultFloat(defaultRewardCut)
 
 	fmt.Printf("Enter fee cut percentage (current=%v default=%v) - ", feeCut, defaultFeeCut)
-	feeCut = w.readDefaultFloat(feeCut)
+	feeCut = w.readDefaultFloat(defaultFeeCut)
 
 	fmt.Println("Enter a transcoding base price in wei per pixels")
 	fmt.Println("eg. 1 wei / 10 pixels = 0,1 wei per pixel")
@@ -66,13 +72,16 @@ func (w *wizard) promptOrchestratorConfig() (float64, float64, int, int, string)
 	fmt.Printf("Enter the price for %d pixels in Wei (required) ", pixelsPerUnit)
 	pricePerUnit := w.readDefaultInt(0)
 
-	addr := myHostPort()
+	if orch.ServiceURI == "" {
+		addr = myHostPort()
+	} else {
+		addr = orch.ServiceURI
+	}
 	fmt.Printf("Enter the public host:port of node (default: %v)", addr)
 	serviceURI := w.readStringAndValidate(func(in string) (string, error) {
 		if "" == in {
 			in = addr
 		}
-		in = "https://" + in
 		uri, err := url.ParseRequestURI(in)
 		if err != nil {
 			return "", err
@@ -143,8 +152,7 @@ func (w *wizard) activateOrchestrator() {
 
 			amount := big.NewInt(0)
 			for amount.Cmp(big.NewInt(0)) == 0 || balBigInt.Cmp(amount) < 0 {
-				fmt.Printf("Enter bond amount - ")
-				amount = w.readBigInt()
+				amount = w.readBigInt("Enter bond amount")
 				if balBigInt.Cmp(amount) < 0 {
 					fmt.Printf("Must enter an amount smaller than the current balance. ")
 				}
@@ -167,6 +175,12 @@ func (w *wizard) activateOrchestrator() {
 }
 
 func (w *wizard) setOrchestratorConfig() {
+
+	if w.offchain {
+		fmt.Println("Cannot set Orchestrator config in off-chain mode")
+		return
+	}
+
 	fmt.Printf("Current token balance: %v\n", w.getTokenBalance())
 
 	val := w.getOrchestratorConfigFormValues()
@@ -274,4 +288,77 @@ func (w *wizard) showVoteChoices() {
 
 func flipPerc(perc *big.Int) *big.Int {
 	return new(big.Int).Sub(hundredPercent, perc)
+}
+
+func (w *wizard) setMaxFaceValue() {
+	mfv := big.NewInt(0)
+	mfv = w.readBigInt("Enter the max ticket face value in wei")
+	data := url.Values{
+		"maxfacevalue": {fmt.Sprintf("%v", mfv.String())},
+	}
+	result, ok := httpPostWithParams(fmt.Sprintf("http://%v:%v/setMaxFaceValue", w.host, w.httpPort), data)
+	if ok {
+		fmt.Printf("Ticket max face value set")
+		return
+	} else {
+		fmt.Printf("Error setting max face value: %v", result)
+		return
+	}
+}
+
+func (w *wizard) setPriceForBroadcaster() {
+	fmt.Println("Enter the ETH address of the broadcaster (default=default)")
+	ethaddr := w.readStringAndValidate(func(in string) (string, error) {
+		if "" == in {
+			in = "default"
+		}
+		if in != "default" && (in[0:2] != "0x" || len(in) != 42) {
+			return "", fmt.Errorf("broadcaster eth address input not in correct format")
+		}
+
+		return in, nil
+	})
+
+	fmt.Println("Enter price per unit:")
+	price := w.readDefaultInt(0)
+	fmt.Println("Enter pixels per unit:")
+	pixels := w.readDefaultInt(1)
+	data := url.Values{
+		"pricePerUnit":       {fmt.Sprintf("%v", strconv.Itoa(price))},
+		"pixelsPerUnit":      {fmt.Sprintf("%v", strconv.Itoa(pixels))},
+		"broadcasterEthAddr": {fmt.Sprintf("%v", ethaddr)},
+	}
+	result, ok := httpPostWithParams(fmt.Sprintf("http://%v:%v/setPriceForBroadcaster", w.host, w.httpPort), data)
+	if ok {
+		fmt.Printf("Price for broadcaster %v set to %v gwei per %v pixels", ethaddr, price, pixels)
+		return
+	} else {
+		fmt.Printf("Error setting price for broadcaster: %v", result)
+		return
+	}
+
+}
+
+func (w *wizard) setMaxSessions() {
+	fmt.Println("Enter the maximum # of sessions")
+	maxSessions := w.readStringAndValidate(func(in string) (string, error) {
+		intVal, err := strconv.Atoi(in)
+		if "" == in || (in != "auto" && intVal <= 0 && err != nil) {
+			return "", fmt.Errorf("Max Sessions must be 'auto' or greater than zero")
+		}
+
+		return in, nil
+	})
+
+	data := url.Values{
+		"maxSessions": {fmt.Sprintf("%v", maxSessions)},
+	}
+	result, ok := httpPostWithParams(fmt.Sprintf("http://%v:%v/setMaxSessions", w.host, w.httpPort), data)
+	if ok {
+		fmt.Printf(result)
+		return
+	} else {
+		fmt.Printf("Error setting max sessions: %v", result)
+		return
+	}
 }

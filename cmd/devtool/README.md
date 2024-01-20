@@ -10,13 +10,8 @@ An on-chain workflow testing tool that supports the following:
 ## Step 1: Set up a private ETH network with Livepeer protocol deployed
 
 ```
-docker pull livepeer/geth-with-livepeer-protocol:streamflow
-docker run -p 8545:8545 -p 8546:8546 --name geth-with-livepeer-protocol livepeer/geth-with-livepeer-protocol:streamflow
-
-# Mac M1 ONLY
-# docker pull darkdragon/geth-with-livepeer-protocol:streamflow
-# docker run -p 8545:8545 -p 8546:8546 --name geth-with-livepeer-protocol darkdragon/geth-with-livepeer-protocol:streamflow
-
+docker pull livepeer/geth-with-livepeer-protocol:confluence
+docker run -p 8545:8545 -p 8546:8546 --name geth-with-livepeer-protocol livepeer/geth-with-livepeer-protocol:confluence
 ```
 
 
@@ -31,5 +26,7 @@ This command will submit the setup transactions for a broadcaster and generate t
 
 `go run cmd/devtool/devtool.go setup transcoder`
 
-This command will submit the setup transactions for an orchestrator/transcoder and generate the Bash scripts 
-`run_orchestrator_<ETH_ACCOUNT>.sh` which can be used to start an orchestrator node and `run_transcoder_<ETH_ACCOUNT>.sh` which can be used to start a transcoder node.
+This command will submit the setup transactions for an orchestrator/transcoder and generate the Bash scripts:
+
+* `run_orchestrator_with_transcoder_<ETH_ACCOUNT>.sh` which can be used to start an orchestrator node that contains a transcoder (combined OT)
+* `run_orchestrator_standalone_<ETH_ACCOUNT>.sh`  and `run_transcoder_<ETH_ACCOUNT>.sh` which can be used to start separate orchestrator and transcoder nodes (split O/T)

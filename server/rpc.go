@@ -19,9 +19,9 @@ import (
 	"github.com/livepeer/go-livepeer/clog"
 	"github.com/livepeer/go-livepeer/common"
 	"github.com/livepeer/go-livepeer/core"
-	"github.com/livepeer/go-livepeer/drivers"
 	"github.com/livepeer/go-livepeer/net"
 	"github.com/livepeer/go-livepeer/pm"
+	"github.com/livepeer/go-tools/drivers"
 	ffmpeg "github.com/livepeer/lpms/ffmpeg"
 	"github.com/livepeer/lpms/stream"
 	"github.com/patrickmn/go-cache"
@@ -36,6 +36,7 @@ import (
 
 const GRPCConnectTimeout = 3 * time.Second
 const GRPCTimeout = 8 * time.Second
+const HTTPIdleTimeout = 10 * time.Minute
 
 var authTokenValidPeriod = 30 * time.Minute
 var discoveryAuthWebhookCacheCleanup = 5 * time.Minute
@@ -54,7 +55,7 @@ type Orchestrator interface {
 	TranscoderResults(job int64, res *core.RemoteTranscoderResult)
 	ProcessPayment(ctx context.Context, payment net.Payment, manifestID core.ManifestID) error
 	TicketParams(sender ethcommon.Address, priceInfo *net.PriceInfo) (*net.TicketParams, error)
-	PriceInfo(sender ethcommon.Address) (*net.PriceInfo, error)
+	PriceInfo(sender ethcommon.Address, manifestID core.ManifestID) (*net.PriceInfo, error)
 	SufficientBalance(addr ethcommon.Address, manifestID core.ManifestID) bool
 	DebitFees(addr ethcommon.Address, manifestID core.ManifestID, price *net.PriceInfo, pixels int64)
 	Capabilities() *net.Capabilities
@@ -117,6 +118,7 @@ type BroadcastSession struct {
 	OrchestratorOS   drivers.OSSession
 	PMSessionID      string
 	Balance          Balance
+	InitialPrice     *net.PriceInfo
 }
 
 func (bs *BroadcastSession) Transcoder() string {
@@ -154,6 +156,11 @@ type lphttp struct {
 	orchestrator Orchestrator
 	orchRPC      *grpc.Server
 	transRPC     *http.ServeMux
+	node         *core.LivepeerNode
+}
+
+func (h *lphttp) EndTranscodingSession(ctx context.Context, request *net.EndTranscodingSessionRequest) (*net.EndTranscodingSessionResponse, error) {
+	return endTranscodingSession(h.node, h.orchestrator, request)
 }
 
 // grpc methods
@@ -175,12 +182,13 @@ func (h *lphttp) Ping(context context.Context, req *net.PingPong) (*net.PingPong
 }
 
 // XXX do something about the implicit start of the http mux? this smells
-func StartTranscodeServer(orch Orchestrator, bind string, mux *http.ServeMux, workDir string, acceptRemoteTranscoders bool) {
+func StartTranscodeServer(orch Orchestrator, bind string, mux *http.ServeMux, workDir string, acceptRemoteTranscoders bool, n *core.LivepeerNode) error {
 	s := grpc.NewServer()
 	lp := lphttp{
 		orchestrator: orch,
 		orchRPC:      s,
 		transRPC:     mux,
+		node:         n,
 	}
 	net.RegisterOrchestratorServer(s, &lp)
 	lp.transRPC.HandleFunc("/segment", lp.ServeSegment)
@@ -191,18 +199,16 @@ func StartTranscodeServer(orch Orchestrator, bind string, mux *http.ServeMux, wo
 
 	cert, key, err := getCert(orch.ServiceURI(), workDir)
 	if err != nil {
-		return // XXX return error
+		return err
 	}
 
 	glog.Info("Listening for RPC on ", bind)
 	srv := http.Server{
-		Addr:    bind,
-		Handler: &lp,
-		// XXX doesn't handle streaming RPC well; split remote transcoder RPC?
-		//ReadTimeout:  HTTPTimeout,
-		//WriteTimeout: HTTPTimeout,
+		Addr:        bind,
+		Handler:     &lp,
+		IdleTimeout: HTTPIdleTimeout,
 	}
-	srv.ListenAndServeTLS(cert, key)
+	return srv.ListenAndServeTLS(cert, key)
 }
 
 // CheckOrchestratorAvailability - the broadcaster calls CheckOrchestratorAvailability which invokes Ping on the orchestrator
@@ -264,6 +270,26 @@ func GetOrchestratorInfo(ctx context.Context, bcast common.Broadcaster, orchestr
 	return r, nil
 }
 
+// EndSession - the broadcaster calls EndTranscodingSession to tear down sessions used for verification only once
+func EndTranscodingSession(ctx context.Context, sess *BroadcastSession) error {
+	uri, err := url.Parse(sess.Transcoder())
+	if err != nil {
+		return err
+	}
+	c, conn, err := startOrchestratorClient(ctx, uri)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	req, err := genEndSessionRequest(sess)
+	_, err = c.EndTranscodingSession(context.Background(), req)
+	if err != nil {
+		return errors.Wrapf(err, "Could not end orchestrator session orch=%v", sess.Transcoder())
+	}
+	return nil
+}
+
 func startOrchestratorClient(ctx context.Context, uri *url.URL) (net.OrchestratorClient, *grpc.ClientConn, error) {
 	clog.V(common.DEBUG).Infof(ctx, "Connecting RPC to uri=%v", uri)
 	conn, err := grpc.Dial(uri.Host,
@@ -287,6 +313,10 @@ func genOrchestratorReq(b common.Broadcaster) (*net.OrchestratorRequest, error) 
 	return &net.OrchestratorRequest{Address: b.Address().Bytes(), Sig: sig}, nil
 }
 
+func genEndSessionRequest(sess *BroadcastSession) (*net.EndTranscodingSessionRequest, error) {
+	return &net.EndTranscodingSessionRequest{AuthToken: sess.OrchestratorInfo.AuthToken}, nil
+}
+
 func getOrchestrator(orch Orchestrator, req *net.OrchestratorRequest) (*net.OrchestratorInfo, error) {
 	addr := ethcommon.BytesToAddress(req.Address)
 	if err := verifyOrchestratorReq(orch, addr, req.Sig); err != nil {
@@ -298,21 +328,30 @@ func getOrchestrator(orch Orchestrator, req *net.OrchestratorRequest) (*net.Orch
 	}
 
 	// currently, orchestrator == transcoder
-	return orchestratorInfo(orch, addr, orch.ServiceURI().String())
+	return orchestratorInfo(orch, addr, orch.ServiceURI().String(), "")
 }
 
-func getPriceInfo(orch Orchestrator, addr ethcommon.Address) (*net.PriceInfo, error) {
+func endTranscodingSession(node *core.LivepeerNode, orch Orchestrator, req *net.EndTranscodingSessionRequest) (*net.EndTranscodingSessionResponse, error) {
+	verifyToken := orch.AuthToken(req.AuthToken.SessionId, req.AuthToken.Expiration)
+	if !bytes.Equal(verifyToken.Token, req.AuthToken.Token) {
+		return nil, fmt.Errorf("Invalid auth token")
+	}
+	node.EndTranscodingSession(req.AuthToken.SessionId)
+	return &net.EndTranscodingSessionResponse{}, nil
+}
+
+func getPriceInfo(orch Orchestrator, addr ethcommon.Address, manifestID core.ManifestID) (*net.PriceInfo, error) {
 	if AuthWebhookURL != nil {
 		webhookRes := getFromDiscoveryAuthWebhookCache(addr.Hex())
 		if webhookRes != nil && webhookRes.PriceInfo != nil {
 			return webhookRes.PriceInfo, nil
 		}
 	}
-	return orch.PriceInfo(addr)
+	return orch.PriceInfo(addr, manifestID)
 }
 
-func orchestratorInfo(orch Orchestrator, addr ethcommon.Address, serviceURI string) (*net.OrchestratorInfo, error) {
-	priceInfo, err := getPriceInfo(orch, addr)
+func orchestratorInfo(orch Orchestrator, addr ethcommon.Address, serviceURI string, manifestID core.ManifestID) (*net.OrchestratorInfo, error) {
+	priceInfo, err := getPriceInfo(orch, addr, manifestID)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +379,7 @@ func orchestratorInfo(orch Orchestrator, addr ethcommon.Address, serviceURI stri
 
 	if os != nil {
 		if os.IsExternal() {
-			tr.Storage = []*net.OSInfo{os.GetInfo()}
+			tr.Storage = []*net.OSInfo{core.ToNetOSInfo(os.GetInfo())}
 		} else {
 			os.EndSession()
 		}
@@ -480,27 +519,13 @@ func coreSegMetadata(segData *net.SegData) (*core.SegTranscodingMetadata, error)
 		caps = core.NewCapabilities(nil, nil)
 	}
 
-	detectorProfs := []ffmpeg.DetectorProfile{}
-	for _, detector := range segData.DetectorProfiles {
-		var detectorProfile ffmpeg.DetectorProfile
-		// Refer to the following for type magic:
-		// https://developers.google.com/protocol-buffers/docs/reference/go-generated#oneof
-		switch x := detector.Value.(type) {
-		case *net.DetectorProfile_SceneClassification:
-			profile := x.SceneClassification
-			classes := []ffmpeg.DetectorClass{}
-			for _, class := range profile.Classes {
-				classes = append(classes, ffmpeg.DetectorClass{
-					ID:   int(class.ClassId),
-					Name: class.ClassName,
-				})
-			}
-			detectorProfile = &ffmpeg.SceneClassificationProfile{
-				SampleRate: uint(profile.SampleRate),
-				Classes:    classes,
-			}
+	var segPar core.SegmentParameters
+	segPar.ForceSessionReinit = segData.ForceSessionReinit
+	if segData.SegmentParameters != nil {
+		segPar.Clip = &core.SegmentClip{
+			From: time.Duration(segData.SegmentParameters.From) * time.Millisecond,
+			To:   time.Duration(segData.SegmentParameters.To) * time.Millisecond,
 		}
-		detectorProfs = append(detectorProfs, detectorProfile)
 	}
 
 	return &core.SegTranscodingMetadata{
@@ -512,8 +537,7 @@ func coreSegMetadata(segData *net.SegData) (*core.SegTranscodingMetadata, error)
 		Duration:           dur,
 		Caps:               caps,
 		AuthToken:          segData.AuthToken,
-		DetectorEnabled:    segData.DetectorEnabled,
-		DetectorProfiles:   detectorProfs,
 		CalcPerceptualHash: segData.CalcPerceptualHash,
+		SegmentParameters:  &segPar,
 	}, nil
 }

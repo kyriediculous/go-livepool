@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
-	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/livepeer/go-livepeer/drivers"
 	"github.com/livepeer/go-livepeer/eth"
 	"github.com/livepeer/go-livepeer/net"
+	"github.com/livepeer/go-tools/drivers"
 	"github.com/livepeer/lpms/ffmpeg"
 	"github.com/livepeer/lpms/stream"
 )
@@ -48,8 +48,7 @@ func TestTranscode(t *testing.T) {
 	//Set up the node
 	drivers.NodeStorage = drivers.NewMemoryDriver(nil)
 	seth := &eth.StubClient{}
-	tmp, _ := ioutil.TempDir("", "")
-	defer os.RemoveAll(tmp)
+	tmp := t.TempDir()
 	n, _ := NewLivepeerNode(seth, tmp, nil)
 	ffmpeg.InitFFmpeg()
 
@@ -90,8 +89,7 @@ func TestTranscode(t *testing.T) {
 }
 
 func TestTranscodeSeg(t *testing.T) {
-	tmp, _ := ioutil.TempDir("", "")
-	defer os.RemoveAll(tmp)
+	tmp := t.TempDir()
 
 	profiles := []ffmpeg.VideoProfile{ffmpeg.P720p60fps16x9, ffmpeg.P144p30fps16x9}
 	n, _ := NewLivepeerNode(nil, tmp, nil)
@@ -133,8 +131,7 @@ func TestTranscodeLoop_GivenNoSegmentsPastTimeout_CleansSegmentChan(t *testing.T
 	//Set up the node
 	drivers.NodeStorage = drivers.NewMemoryDriver(nil)
 	seth := &eth.StubClient{}
-	tmp, _ := ioutil.TempDir("", "")
-	defer os.RemoveAll(tmp)
+	tmp := t.TempDir()
 	n, _ := NewLivepeerNode(seth, tmp, nil)
 	ffmpeg.InitFFmpeg()
 	ss := StubSegment()
@@ -156,6 +153,39 @@ func TestTranscodeLoop_GivenNoSegmentsPastTimeout_CleansSegmentChan(t *testing.T
 
 	segChan = getSegChan(n, mid)
 	assert.Nil(segChan)
+}
+
+func TestTranscodeLoop_CleanupForBroadcasterEndTranscodingSession(t *testing.T) {
+	assert := assert.New(t)
+	require := require.New(t)
+
+	drivers.NodeStorage = drivers.NewMemoryDriver(nil)
+	oldTranscodeLoopTimeout := transcodeLoopTimeout
+	defer func() { transcodeLoopTimeout = oldTranscodeLoopTimeout }()
+	transcodeLoopTimeout = 100 * time.Millisecond
+
+	tmp := t.TempDir()
+
+	ffmpeg.InitFFmpeg()
+	n, _ := NewLivepeerNode(&eth.StubClient{}, tmp, nil)
+	n.Transcoder = NewLocalTranscoder(tmp)
+
+	md := &SegTranscodingMetadata{Profiles: videoProfiles, AuthToken: stubAuthToken()}
+	mid := ManifestID(md.AuthToken.SessionId)
+
+	ss := StubSegment()
+	_, err := n.sendToTranscodeLoop(context.TODO(), md, ss)
+	require.Nil(err)
+	require.NotNil(getSegChan(n, mid))
+
+	startRoutines := runtime.NumGoroutine()
+
+	n.endTranscodingSession(md.AuthToken.SessionId, context.TODO())
+	waitForTranscoderLoopTimeout(n, mid)
+
+	endRoutines := runtime.NumGoroutine()
+
+	assert.Equal(endRoutines, startRoutines-1)
 }
 
 func waitForTranscoderLoopTimeout(n *LivepeerNode, m ManifestID) {

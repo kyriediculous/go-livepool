@@ -9,6 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jaypipes/ghw"
+	"github.com/jaypipes/ghw/pkg/gpu"
+	"github.com/jaypipes/ghw/pkg/pci"
+	"github.com/jaypipes/pcidb"
 	"github.com/livepeer/go-livepeer/net"
 	"github.com/livepeer/lpms/ffmpeg"
 	"github.com/stretchr/testify/assert"
@@ -58,12 +62,14 @@ func TestFFmpegProfiletoNetProfile(t *testing.T) {
 
 	profiles := []ffmpeg.VideoProfile{
 		ffmpeg.VideoProfile{
-			Name:       "prof1",
-			Bitrate:    "432k",
-			Framerate:  uint(560),
-			Resolution: "123x456",
-			Profile:    ffmpeg.ProfileH264Main,
-			GOP:        123 * 1000000, //  milliseconds (in nanoseconds)
+			Name:         "prof1",
+			Bitrate:      "432k",
+			Framerate:    uint(560),
+			Resolution:   "123x456",
+			Profile:      ffmpeg.ProfileH264Main,
+			GOP:          123 * 1000000, //  milliseconds (in nanoseconds)
+			ColorDepth:   ffmpeg.ColorDepth8Bit,
+			ChromaFormat: ffmpeg.ChromaSubsampling420,
 		},
 		ffmpeg.VideoProfile{
 			Name:         "prof2",
@@ -72,12 +78,22 @@ func TestFFmpegProfiletoNetProfile(t *testing.T) {
 			FramerateDen: uint(12),
 			Resolution:   "456x987",
 			GOP:          -100,
+			ColorDepth:   ffmpeg.ColorDepth10Bit,
+			ChromaFormat: ffmpeg.ChromaSubsampling444,
 		},
 	}
 
 	// empty name should return automatically generated name
 	profiles[0].Name = ""
 	fullProfiles, err := FFmpegProfiletoNetProfile(profiles)
+
+	assert.Equal(fullProfiles[0].ColorDepth, int32(ffmpeg.ColorDepth8Bit))
+	assert.Equal(fullProfiles[1].ColorDepth, int32(ffmpeg.ColorDepth10Bit))
+	assert.Equal(fullProfiles[0].ChromaFormat, net.VideoProfile_CHROMA_420)
+	assert.Equal(fullProfiles[1].ChromaFormat, net.VideoProfile_CHROMA_444)
+	profiles[0].ColorDepth = ffmpeg.ColorDepth12Bit
+	profiles[0].ChromaFormat = ffmpeg.ChromaSubsampling422
+	profiles[1].ColorDepth = ffmpeg.ColorDepth16Bit
 
 	width, height, err := ffmpeg.VideoProfileResolution(profiles[0])
 	assert.Nil(err)
@@ -92,6 +108,10 @@ func TestFFmpegProfiletoNetProfile(t *testing.T) {
 	fullProfiles, err = FFmpegProfiletoNetProfile(profiles)
 	assert.Nil(err)
 	profiles[0].Name = "prof1"
+
+	assert.Equal(fullProfiles[0].ColorDepth, int32(ffmpeg.ColorDepth12Bit))
+	assert.Equal(fullProfiles[0].ChromaFormat, net.VideoProfile_CHROMA_422)
+	assert.Equal(fullProfiles[1].ColorDepth, int32(ffmpeg.ColorDepth16Bit))
 
 	// Empty bitrate should return parsing error
 	profiles[0].Bitrate = ""
@@ -331,4 +351,135 @@ func TestRatPriceInfo(t *testing.T) {
 	priceInfo, err = RatPriceInfo(&net.PriceInfo{PricePerUnit: 7, PixelsPerUnit: 2})
 	assert.Nil(err)
 	assert.Zero(priceInfo.Cmp(big.NewRat(7, 2)))
+}
+
+func TestParseAccelDevices_FailedDetection(t *testing.T) {
+	assert := assert.New(t)
+
+	getGPU = func() ([]*gpu.GraphicsCard, error) {
+		return []*gpu.GraphicsCard{}, nil
+	}
+	getPCI = func() ([]*pci.Device, error) {
+		return []*pci.Device{}, nil
+	}
+
+	ids, err := ParseAccelDevices("all", ffmpeg.Nvidia)
+
+	assert.NotNil(err)
+	assert.Equal(len(ids), 0)
+}
+
+func TestParseAccessDevices_Gpu(t *testing.T) {
+	assert := assert.New(t)
+
+	originGetGPU := getGPU
+	originGetPCI := getPCI
+
+	getGPU = func() ([]*gpu.GraphicsCard, error) {
+		gpus := []*gpu.GraphicsCard{}
+		for i := 0; i < 3; i++ {
+			gpus = append(gpus, &gpu.GraphicsCard{
+				DeviceInfo: &ghw.PCIDevice{
+					Vendor: &pcidb.Vendor{
+						Name: "--Nvidia Corp",
+					},
+				},
+			})
+		}
+
+		return gpus, nil
+	}
+	ids, err := ParseAccelDevices("all", ffmpeg.Nvidia)
+
+	assert.Nil(err)
+	assert.Equal(len(ids), 3)
+	assert.Equal(ids[0], "0")
+	assert.Equal(ids[1], "1")
+	assert.Equal(ids[2], "2")
+
+	getGPU = originGetGPU
+	getPCI = originGetPCI
+}
+
+func TestParseAccessDevices_GpuFailedProbing(t *testing.T) {
+	assert := assert.New(t)
+
+	originGetGPU := getGPU
+	originGetPCI := getPCI
+
+	getGPU = func() ([]*gpu.GraphicsCard, error) {
+		return []*gpu.GraphicsCard{}, nil
+	}
+
+	getPCI = func() ([]*pci.Device, error) {
+		pcis := []*pci.Device{}
+		for i := 0; i < 2; i++ {
+			pcis = append(pcis, &pci.Device{
+				Vendor: &pcidb.Vendor{
+					Name: "--Nvidia Corp",
+				},
+				Driver: "nvidia",
+			})
+		}
+		return pcis, nil
+	}
+
+	ids, err := ParseAccelDevices("all", ffmpeg.Nvidia)
+
+	assert.Nil(err)
+	assert.Equal(len(ids), 2)
+	assert.Equal(ids[0], "0")
+	assert.Equal(ids[1], "1")
+
+	getGPU = originGetGPU
+	getPCI = originGetPCI
+}
+
+func TestParseAccelDevices_WrongDriver(t *testing.T) {
+	assert := assert.New(t)
+
+	originGetGPU := getGPU
+	originGetPCI := getPCI
+
+	getGPU = func() ([]*gpu.GraphicsCard, error) {
+		return []*gpu.GraphicsCard{}, nil
+	}
+
+	getPCI = func() ([]*pci.Device, error) {
+		pcis := []*pci.Device{}
+		for i := 0; i < 4; i++ {
+			pcis = append(pcis, &pci.Device{
+				Vendor: &pcidb.Vendor{
+					Name: "--Nvidia Corp",
+				},
+				Class: &pcidb.Class{
+					Name: "Display Controller",
+				},
+			})
+		}
+
+		return pcis, nil
+	}
+
+	ids, err := ParseAccelDevices("all", ffmpeg.Nvidia)
+
+	assert.Nil(err)
+	assert.Equal(len(ids), 4)
+	assert.Equal(ids[0], "0")
+	assert.Equal(ids[1], "1")
+	assert.Equal(ids[2], "2")
+	assert.Equal(ids[3], "3")
+
+	getGPU = originGetGPU
+	getPCI = originGetPCI
+}
+
+func TestParseAccelDevices_CustomSelection(t *testing.T) {
+	assert := assert.New(t)
+
+	ids, _ := ParseAccelDevices("0,3,1", ffmpeg.Nvidia)
+	assert.Equal(len(ids), 3)
+	assert.Equal(ids[0], "0")
+	assert.Equal(ids[1], "3")
+	assert.Equal(ids[2], "1")
 }
