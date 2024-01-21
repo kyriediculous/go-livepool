@@ -4,11 +4,11 @@ GO_BUILD_DIR?="./"
 all: net/lp_rpc.pb.go net/redeemer.pb.go net/redeemer_mock.pb.go core/test_segment.go livepeer livepool livepeer_cli livepeer_router livepeer_bench
 
 net/lp_rpc.pb.go: net/lp_rpc.proto
-	protoc -I=. --go_out=plugins=grpc:. $^
+	protoc -I=. --go_out=. --go-grpc_out=. $^
 
 net/redeemer.pb.go: net/redeemer.proto
-	protoc -I=. --go_out=plugins=grpc:. $^
-
+	protoc -I=. --go_out=. --go-grpc_out=. $^
+	
 net/redeemer_mock.pb.go: net/redeemer.pb.go
 	mockgen -source net/redeemer.pb.go -destination net/redeemer_mock.pb.go -package net $^
 
@@ -49,6 +49,7 @@ ifeq ($(BUILDOS),darwin)
 			ifeq ($(GOARCH),arm64)
 				cgo_cflags += --target=arm64-apple-macos11
 				cgo_ldflags += --target=arm64-apple-macos11
+				cgo_cflags += -target x86_64-apple-darwin20.3.0
 			endif
 		endif
 	endif

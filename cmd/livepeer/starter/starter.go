@@ -141,6 +141,8 @@ type LivepeerConfig struct {
 	OrchWebhookURL         *string
 	OrchBlacklist          *string
 	TestOrchAvail          *bool
+	PublicTPool            *bool
+	PoolCommission         *int
 }
 
 // DefaultLivepeerConfig creates LivepeerConfig exactly the same as when no flags are passed to the livepeer process.
@@ -228,6 +230,10 @@ func DefaultLivepeerConfig() LivepeerConfig {
 	// Flags
 	defaultTestOrchAvail := true
 
+	// Video Mining Pool
+	publicTPool := false
+	poolCommission := 1
+
 	return LivepeerConfig{
 		// Network & Addresses:
 		Network:      &defaultNetwork,
@@ -311,6 +317,10 @@ func DefaultLivepeerConfig() LivepeerConfig {
 
 		// Flags
 		TestOrchAvail: &defaultTestOrchAvail,
+
+		// Video Mining Pool
+		PublicTPool:    &publicTPool,
+		PoolCommission: &poolCommission,
 	}
 }
 
@@ -821,6 +831,14 @@ func StartLivepeer(ctx context.Context, cfg LivepeerConfig) {
 				n.SetMaxFaceValue(mfv)
 			}
 
+			if *cfg.PublicTPool {
+				comissionRate := big.NewInt(int64(*cfg.PoolCommission))
+				pool := core.NewPublicTranscoderPool(n, timeWatcher.SubscribeRounds, comissionRate)
+				n.TranscoderManager.Pool = pool
+				// go pool.StartPayoutLoop()
+				// defer pool.StopPayoutLoop()
+			}
+
 		}
 		if n.NodeType == core.BroadcasterNode {
 			maxEV, _ := new(big.Rat).SetString(*cfg.MaxTicketEV)
@@ -1210,7 +1228,8 @@ func StartLivepeer(ctx context.Context, cfg LivepeerConfig) {
 			glog.Exit("Missing -orchAddr")
 		}
 
-		go server.RunTranscoder(n, orchURLs[0].Host, core.MaxSessions, transcoderCaps)
+		ethereumAddr := ethcommon.HexToAddress(*cfg.EthAcctAddr)
+		go server.RunTranscoder(n, orchURLs, core.MaxSessions, transcoderCaps, ethereumAddr)
 	}
 
 	switch n.NodeType {

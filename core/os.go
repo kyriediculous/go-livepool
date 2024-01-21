@@ -7,12 +7,13 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net/http"
+	"time"
+
 	"github.com/livepeer/go-livepeer/clog"
 	"github.com/livepeer/go-livepeer/common"
 	"github.com/livepeer/go-livepeer/net"
 	"github.com/livepeer/go-tools/drivers"
-	"net/http"
-	"time"
 )
 
 func GetSegmentData(ctx context.Context, uri string) ([]byte, error) {

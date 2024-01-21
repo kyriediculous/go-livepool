@@ -40,10 +40,6 @@ func main() {
 
 	cfg := parseLivepeerConfig()
 
-	// Transcoder pool
-	publicTPool := flag.Bool("transcoderPool", false, "Set to true to enable a public transcoder pool")
-	poolCommission := flag.Int("poolCommission", 1, "Commision for the public transcoder pool in percentage points")
-
 	// Config file
 	_ = flag.String("config", "", "Config file in the format 'key value', flags and env vars take precedence over the config file")
 	err := ff.Parse(flag.CommandLine, os.Args[1:],
