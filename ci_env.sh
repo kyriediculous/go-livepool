@@ -26,11 +26,8 @@ if [[ "${CIRCLE_BRANCH:-}" != "" ]]; then
   branch="$CIRCLE_BRANCH"
 elif [[ "${TRAVIS_BRANCH:-}" != "" ]]; then
   branch="$TRAVIS_BRANCH"
-<<<<<<< HEAD
-=======
 elif [[ "${GITHUB_REF_NAME:-}" != "" ]]; then
   branch="$GITHUB_REF_NAME"
->>>>>>> livepeer/master
 fi
 
 # By default we build with mainnet support
