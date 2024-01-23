@@ -75,6 +75,7 @@ type LivepeerConfig struct {
 	Recordstore            *string
 	FVfailGsBucket         *string
 	FVfailGsKey            *string
+	LocalVerify            *bool
 }
 
 // DefaultLivepeerConfig creates LivepeerConfig exactly the same as when no flags are passed to the livepeer process.
@@ -102,9 +103,24 @@ func DefaultLivepeerConfig() LivepeerConfig {
 	defaultMonitor := false
 	defaultMetricsPerStream := false
 	defaultMetricsExposeClientIP := false
+	defaultMetadataQueueUri := ""
+	defaultMetadataAmqpExchange := "lp_golivepeer_metadata"
+	defaultMetadataPublishTimeout := 1 * time.Second
 
 	// Ingest:
 	defaultHttpIngest := true
+
+	// Verification:
+	defaultLocalVerify := true
+
+	// Storage:
+	defaultDatadir := ""
+	defaultObjectstore := ""
+	defaultRecordstore := ""
+
+	// Fast Verification GS bucket:
+	defaultFVfailGsBucket := ""
+	defaultFVfailGsKey := ""
 
 	return LivepeerConfig{
 
@@ -124,13 +140,28 @@ func DefaultLivepeerConfig() LivepeerConfig {
 		Netint:             &defaultNetint,
 
 		// Onchain:
-		EthAcctAddr:           &defaultEthAcctAddr,
-		Monitor:               &defaultMonitor,
-		MetricsPerStream:      &defaultMetricsPerStream,
-		MetricsExposeClientIP: &defaultMetricsExposeClientIP,
+		EthAcctAddr:            &defaultEthAcctAddr,
+		Monitor:                &defaultMonitor,
+		MetricsPerStream:       &defaultMetricsPerStream,
+		MetricsExposeClientIP:  &defaultMetricsExposeClientIP,
+		MetadataQueueUri:       &defaultMetadataQueueUri,
+		MetadataAmqpExchange:   &defaultMetadataAmqpExchange,
+		MetadataPublishTimeout: &defaultMetadataPublishTimeout,
 
 		// Ingest:
 		HttpIngest: &defaultHttpIngest,
+
+		// Verification:
+		LocalVerify: &defaultLocalVerify,
+
+		// Storage:
+		Datadir:     &defaultDatadir,
+		Objectstore: &defaultObjectstore,
+		Recordstore: &defaultRecordstore,
+
+		// Fast Verification GS bucket:
+		FVfailGsBucket: &defaultFVfailGsBucket,
+		FVfailGsKey:    &defaultFVfailGsKey,
 	}
 }
 
