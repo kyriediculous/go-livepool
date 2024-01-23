@@ -9,7 +9,7 @@ require (
 	github.com/golang/glog v1.1.1
 	github.com/golang/mock v1.6.0
 	github.com/golang/protobuf v1.5.3
-	github.com/jaypipes/ghw v0.10.0
+	github.com/jaypipes/ghw v0.12.0
 	github.com/jaypipes/pcidb v1.0.0
 	github.com/livepeer/go-tools v0.0.0-20220805063103-76df6beb6506
 	github.com/livepeer/livepeer-data v0.7.5-0.20231004073737-06f1f383fb18
@@ -28,6 +28,7 @@ require (
 	go.uber.org/goleak v1.3.0
 	golang.org/x/net v0.17.0
 	google.golang.org/grpc v1.57.1
+	google.golang.org/protobuf v1.30.0
 	pgregory.net/rapid v1.1.0
 )
 
@@ -140,7 +141,6 @@ require (
 	google.golang.org/genproto v0.0.0-20230526161137-0005af68ea54 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20230525234035-dd9d682886f9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230525234030-28d5490b6b19 // indirect
-	google.golang.org/protobuf v1.30.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	howett.net/plist v1.0.0 // indirect
