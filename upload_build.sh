@@ -107,7 +107,7 @@ fi
 # https://stackoverflow.com/a/44751929/990590
 BUCKET="build.livepool.io"
 PROJECT="go-livepool"
-BUCKET_PATH="${PROJECT}/${VERSION_AND_NETWORK}/${FILE}"
+BUCKET_PATH="${VERSION_AND_NETWORK}/${FILE}"
 resource="/${BUCKET}/${BUCKET_PATH}"
 contentType="application/x-compressed-tar"
 dateValue="$(date -R)"
