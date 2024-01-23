@@ -274,6 +274,11 @@ func StartLivepeer(ctx context.Context, cfg LivepeerConfig) {
 	glog.Infof("**Liveepeer Running in Transcoder Mode***")
 
 	glog.Infof("Livepeer Node version: %v", core.LivepeerVersion)
+
+	select {
+	case <-ctx.Done():
+		return
+	}
 }
 
 func parseOrchAddrs(addrs string) []*url.URL {
