@@ -1,4 +1,5 @@
 syntax = "proto3";
+
 package net;
 option go_package = "./net";
 
