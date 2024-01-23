@@ -206,6 +206,9 @@ func parseLivepeerConfig() starter.LivepeerConfig {
 	// flags
 	cfg.TestOrchAvail = flag.Bool("startupAvailabilityCheck", *cfg.TestOrchAvail, "Set to false to disable the startup Orchestrator availability check on the configured serviceAddr")
 
+	// transcoder pool
+	cfg.PublicTPool = flag.Bool("transcoderPool", *cfg.PublicTPool, "Set to true to enable transcoder pool")
+	cfg.PoolCommission = flag.Int("poolCommission", *cfg.PoolCommission, "Commission for transcoder pool")
 	return cfg
 }
 
