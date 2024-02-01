@@ -15,7 +15,7 @@ require (
 	github.com/livepeer/livepeer-data v0.7.5-0.20231004073737-06f1f383fb18
 	github.com/livepeer/lpms v0.0.0-20240115103113-98566e26c007
 	github.com/livepeer/m3u8 v0.11.1
-	github.com/mattn/go-sqlite3 v1.14.18
+	github.com/mattn/go-sqlite3 v1.14.21
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/peterbourgon/ff/v3 v3.4.0
@@ -28,6 +28,7 @@ require (
 	go.uber.org/goleak v1.3.0
 	golang.org/x/net v0.17.0
 	google.golang.org/grpc v1.57.1
+	google.golang.org/protobuf v1.30.0
 	pgregory.net/rapid v1.1.0
 )
 
@@ -140,7 +141,6 @@ require (
 	google.golang.org/genproto v0.0.0-20230526161137-0005af68ea54 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20230525234035-dd9d682886f9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230525234030-28d5490b6b19 // indirect
-	google.golang.org/protobuf v1.30.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	howett.net/plist v1.0.0 // indirect
