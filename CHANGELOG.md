@@ -1,5 +1,87 @@
 # Changelog
 
+## v0.7.4
+
+### Breaking Changes 🚨🚨
+
+### Features ⚒
+
+#### General
+
+- [#2989](https://github.com/livepeer/go-livepeer/pull/2989) Revert "Update ffmpeg version" (@thomshutt)
+
+#### Broadcaster
+
+#### Orchestrator
+
+#### Transcoder
+
+### Bug Fixes 🐞
+
+#### CLI
+
+#### General
+
+#### Broadcaster
+
+#### Orchestrator
+
+#### Transcoder
+
+## v0.7.3
+
+### Breaking Changes 🚨🚨
+
+### Features ⚒
+
+#### General
+
+- [#2978](https://github.com/livepeer/go-livepeer/pull/2978) Update CUDA version from 11.x to 12.x (@leszko)
+- [#2973](https://github.com/livepeer/go-livepeer/pull/2973) Update ffmpeg version (@thomshutt)
+- [#2981](https://github.com/livepeer/go-livepeer/pull/2981) Add support for prices in custom currencies like USD (@victorges)
+
+#### Broadcaster
+
+#### Orchestrator
+
+#### Transcoder
+
+### Bug Fixes 🐞
+
+#### CLI
+
+#### General
+
+#### Broadcaster
+
+#### Orchestrator
+
+#### Transcoder
+
+## v0.7.2
+
+### Breaking Changes 🚨🚨
+
+- None
+
+#### General
+- [#2938](https://github.com/livepeer/go-livepeer/pull/2938) Add `tmp` folder to `.gitignore` (@rickstaa)
+
+#### Broadcaster
+- [#2896](https://github.com/livepeer/go-livepeer/pull/2896) Use FPS of 60, rather than 120 for cost estimation (@thomshutt)
+- [#2948](https://github.com/livepeer/go-livepeer/pull/2948) Remove logging from metrics methods (@thomshutt)
+
+#### Orchestrator
+- [#2911](https://github.com/livepeer/go-livepeer/pull/2911) Set default price with livepeer_cli option 20 (@eliteprox)
+- [#2928](https://github.com/livepeer/go-livepeer/pull/2928) Added `startupAvailabilityCheck` param to skip the availability check on startup (@stronk-dev)
+- [#2905](https://github.com/livepeer/go-livepeer/pull/2905) Add `reward_call_errors` Prometheus metric (@rickstaa)
+- [#2958](https://github.com/livepeer/go-livepeer/pull/2958) Return parsing error when failing to parse B prices (@thomshutt)
+
+#### Transcoder
+
+### Bug Fixes 🐞
+- [#2914](https://github.com/livepeer/go-livepeer/pull/2914) fixes a bug that prevented `pricePerBroadcaster` JSON files with line-breaks from being parsed correctly (@rickstaa).
+
 ## v0.7.1
 
 ### Breaking Changes 🚨🚨
@@ -538,7 +620,7 @@ Additional highlights of this release:
 - Support for EIP-1559 (otherwise known as type 2) Ethereum transactions which results in more predictable transaction confirmation times, reduces the chance of stuck pending transactions and avoids overpaying in gas fees. If you are interested in additional details on the implications of EIP-1559 transactions refer to this [resource](https://hackmd.io/@timbeiko/1559-resources).
 - An improvement in ticket parameter generation for orchestrators to prevent short lived gas price spikes on the Ethereum network from disrupting streams.
 - The node will automatically detect if the GPU enters an unrecoverable state and crash. The reason for crashing upon detecting an unrecoverable GPU state is that no transcoding will
-be possible in this scenario until the node is restarted. We recommend node operators to setup a process for monitoring if their node is still up and starting the node if it has crashed. For reference, a bash script similar to [this one](https://gist.github.com/jailuthra/03c3d65d0bbff457cae8f9a14b4c04b7) can be used to automate restarts of the node in the event of a crash.
+  be possible in this scenario until the node is restarted. We recommend node operators to setup a process for monitoring if their node is still up and starting the node if it has crashed. For reference, a bash script similar to [this one](https://gist.github.com/jailuthra/03c3d65d0bbff457cae8f9a14b4c04b7) can be used to automate restarts of the node in the event of a crash.
 
 Thanks to everyone that submitted bug reports and assisted in testing!
 

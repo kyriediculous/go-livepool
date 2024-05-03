@@ -1543,6 +1543,7 @@ type RegisterRequest struct {
 	Capacity int64 `protobuf:"varint,2,opt,name=capacity,proto3" json:"capacity,omitempty"`
 	// Transcoder capabilities
 	Capabilities *Capabilities `protobuf:"bytes,3,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
+
 	// Transcoder ethereum address
 	EthereumAddress []byte `protobuf:"bytes,4,opt,name=ethereum_address,json=ethereumAddress,proto3" json:"ethereum_address,omitempty"`
 }
