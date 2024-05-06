@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -181,6 +183,26 @@ func StartLivepeer(ctx context.Context, cfg LivepeerConfig) {
 	// If multiple orchAddr specified, ensure other necessary flags present and clean up list
 	orchURLs := parseOrchAddrs(*cfg.OrchAddr)
 
+	if *cfg.Datadir == "" {
+		homedir := os.Getenv("HOME")
+		if homedir == "" {
+			usr, err := user.Current()
+			if err != nil {
+				exit("Cannot find current user: %v", err)
+			}
+			homedir = usr.HomeDir
+		}
+		*cfg.Datadir = filepath.Join(homedir, ".lpData")
+	}
+
+	//Make sure datadir is present
+	if _, err := os.Stat(*cfg.Datadir); os.IsNotExist(err) {
+		glog.Infof("Creating data dir: %v", *cfg.Datadir)
+		if err = os.MkdirAll(*cfg.Datadir, 0755); err != nil {
+			glog.Errorf("Error creating datadir: %v", err)
+		}
+	}
+
 	n, err := core.NewLivepeerNode(nil, *cfg.Datadir, nil)
 	if err != nil {
 		glog.Errorf("Error creating livepeer node: %v", err)
@@ -236,6 +258,8 @@ func StartLivepeer(ctx context.Context, cfg LivepeerConfig) {
 	}
 
 	n.NodeType = core.TranscoderNode
+
+	n.Capabilities = core.NewCapabilities(transcoderCaps, core.MandatoryOCapabilities())
 
 	lpmon.NodeID = *cfg.EthAcctAddr
 	if lpmon.NodeID != "" {
