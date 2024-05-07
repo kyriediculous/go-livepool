@@ -103,7 +103,7 @@ livepeer:
 
 .PHONY: livepool
 livepool:
-	GO111MODULE=on CGO_ENABLED=1 CGO_LDFLAGS="$(cgo_ldflags)" go build -tags "$(HIGHEST_CHAIN_TAG)" -ldflags="$(ldflags)" cmd/livepool/*.go
+	GO111MODULE=on CGO_ENABLED=1 CC="$(cc)" CGO_CFLAGS="$(cgo_cflags)" CGO_LDFLAGS="$(cgo_ldflags) ${CGO_LDFLAGS}" go build -tags "$(HIGHEST_CHAIN_TAG)" -ldflags="$(ldflags)" cmd/livepool/*.go
 
 .PHONY: livepeer_cli
 livepeer_cli:
