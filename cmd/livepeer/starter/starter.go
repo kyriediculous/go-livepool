@@ -145,8 +145,8 @@ type LivepeerConfig struct {
 	OrchWebhookURL          *string
 	OrchBlacklist           *string
 	TestOrchAvail           *bool
-	PublicTPool            *bool
-	PoolCommission         *int
+	PublicTPool             *bool
+	PoolCommission          *int
 }
 
 // DefaultLivepeerConfig creates LivepeerConfig exactly the same as when no flags are passed to the livepeer process.

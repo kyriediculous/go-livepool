@@ -225,11 +225,11 @@ func InitDB(dbPath string) (*DB, error) {
 	INSERT INTO remoteTranscoders(address, pending, payout)
 	VALUES(:address, :pending, :payout)
 	ON CONFLICT(address) DO UPDATE SET
-	pending = 
+	pending =
 		CASE WHEN excluded.pending == ""
 		THEN remoteTranscoders.pending
 		ELSE excluded.pending END,
-	payout = 
+	payout =
 		CASE WHEN excluded.payout == ""
 		THEN remoteTranscoders.payout
 		ELSE excluded.payout END
