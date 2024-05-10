@@ -248,57 +248,57 @@ jobs:
       - name: Notify new build upload
         run: curl -X POST https://holy-bread-207a.livepeer.workers.dev
 
-  upload:
-    name: Upload artifacts to google bucket
-    permissions:
-      contents: "read"
-      id-token: "write"
-    runs-on: ubuntu-latest
-    needs:
-      - macos-build
-      - linux-build
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: release-artifacts
-          path: releases/
+  # upload:
+  #   name: Upload artifacts to google bucket
+  #   permissions:
+  #     contents: "read"
+  #     id-token: "write"
+  #   runs-on: ubuntu-latest
+  #   needs:
+  #     - macos-build
+  #     - linux-build
+  #   steps:
+  #     - name: Download artifacts
+  #       uses: actions/download-artifact@v3
+  #       with:
+  #         name: release-artifacts
+  #         path: releases/
 
-      - name: Generate sha256 checksum and gpg signatures for release artifacts
-        uses: livepeer/action-gh-checksum-and-gpg-sign@latest
-        with:
-          artifacts-dir: releases
-          release-name: ${{ (github.ref_type == 'tag' && github.ref_name) || github.sha }}
-          gpg-key: ${{ secrets.CI_GPG_SIGNING_KEY }}
-          gpg-key-passphrase: ${{ secrets.CI_GPG_SIGNING_PASSPHRASE }}
+  #     - name: Generate sha256 checksum and gpg signatures for release artifacts
+  #       uses: livepeer/action-gh-checksum-and-gpg-sign@latest
+  #       with:
+  #         artifacts-dir: releases
+  #         release-name: ${{ (github.ref_type == 'tag' && github.ref_name) || github.sha }}
+  #         gpg-key: ${{ secrets.CI_GPG_SIGNING_KEY }}
+  #         gpg-key-passphrase: ${{ secrets.CI_GPG_SIGNING_PASSPHRASE }}
 
-      - name: Generate branch manifest
-        id: branch-manifest
-        uses: livepeer/branch-manifest-action@latest
-        with:
-          project-name: livepeer
-          bucket-key: ${{ github.event.repository.name }}
-          use-prefix: false
+  #     - name: Generate branch manifest
+  #       id: branch-manifest
+  #       uses: livepeer/branch-manifest-action@latest
+  #       with:
+  #         project-name: livepeer
+  #         bucket-key: ${{ github.event.repository.name }}
+  #         use-prefix: false
 
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.CI_GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.CI_GOOGLE_SERVICE_ACCOUNT }}
+  #     - name: Authenticate to Google Cloud
+  #       id: auth
+  #       uses: google-github-actions/auth@v2
+  #       with:
+  #         workload_identity_provider: ${{ secrets.CI_GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+  #         service_account: ${{ secrets.CI_GOOGLE_SERVICE_ACCOUNT }}
 
-      - name: Upload release archives to Google Cloud
-        id: upload-archives
-        uses: google-github-actions/upload-cloud-storage@v1
-        with:
-          path: "releases"
-          destination: "build.livepeer.live/${{ github.event.repository.name }}/${{ (github.ref_type == 'tag' && github.ref_name) || github.sha }}"
-          parent: false
+  #     - name: Upload release archives to Google Cloud
+  #       id: upload-archives
+  #       uses: google-github-actions/upload-cloud-storage@v1
+  #       with:
+  #         path: "releases"
+  #         destination: "build.livepeer.live/${{ github.event.repository.name }}/${{ (github.ref_type == 'tag' && github.ref_name) || github.sha }}"
+  #         parent: false
 
-      - name: Upload branch manifest file
-        id: upload-manifest
-        uses: google-github-actions/upload-cloud-storage@v1
-        with:
-          path: ${{ steps.branch-manifest.outputs.manifest-file }}
-          destination: "build.livepeer.live/${{ github.event.repository.name }}/"
-          parent: false
+  #     - name: Upload branch manifest file
+  #       id: upload-manifest
+  #       uses: google-github-actions/upload-cloud-storage@v1
+  #       with:
+  #         path: ${{ steps.branch-manifest.outputs.manifest-file }}
+  #         destination: "build.livepeer.live/${{ github.event.repository.name }}/"
+  #         parent: false
