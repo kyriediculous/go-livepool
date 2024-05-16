@@ -997,7 +997,9 @@ func (rtm *RemoteTranscoderManager) selectTranscoder(sessionId string, caps *Cap
 	findCompatibleTranscoder := func(rtm *RemoteTranscoderManager) int {
 		for i := len(rtm.remoteTranscoders) - 1; i >= 0; i-- {
 			// no capabilities = default capabilities, all transcoders must support them
-			if caps == nil || caps.bitstring.CompatibleWith(rtm.remoteTranscoders[i].capabilities.bitstring) {
+			if caps == nil ||
+				(caps.bitstring.CompatibleWith(rtm.remoteTranscoders[i].capabilities.bitstring) &&
+					caps.LivepeerVersionCompatibleWith(rtm.remoteTranscoders[i].capabilities.ToNetCapabilities())) {
 				return i
 			}
 		}
@@ -1052,7 +1054,7 @@ func (node *RemoteTranscoderManager) EndTranscodingSession(sessionId string) {
 	panic("shouldn't be called on RemoteTranscoderManager")
 }
 
-// completeStreamSessions end a stream session for a remote transcoder and decrements its load
+// completeStreamSession end a stream session for a remote transcoder and decrements its load
 // caller should hold the mutex lock
 func (rtm *RemoteTranscoderManager) completeStreamSession(sessionId string) {
 	t, ok := rtm.streamSessions[sessionId]

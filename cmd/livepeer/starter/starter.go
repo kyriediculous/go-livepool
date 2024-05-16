@@ -144,6 +144,7 @@ type LivepeerConfig struct {
 	AuthWebhookURL          *string
 	OrchWebhookURL          *string
 	OrchBlacklist           *string
+	OrchMinLivepeerVersion  *string
 	TestOrchAvail           *bool
 	PublicTPool             *bool
 	PoolCommission          *int
@@ -232,6 +233,7 @@ func DefaultLivepeerConfig() LivepeerConfig {
 	// API
 	defaultAuthWebhookURL := ""
 	defaultOrchWebhookURL := ""
+	defaultMinLivepeerVersion := ""
 
 	// Flags
 	defaultTestOrchAvail := true
@@ -320,8 +322,9 @@ func DefaultLivepeerConfig() LivepeerConfig {
 		FVfailGsKey:    &defaultFVfailGsKey,
 
 		// API
-		AuthWebhookURL: &defaultAuthWebhookURL,
-		OrchWebhookURL: &defaultOrchWebhookURL,
+		AuthWebhookURL:         &defaultAuthWebhookURL,
+		OrchWebhookURL:         &defaultOrchWebhookURL,
+		OrchMinLivepeerVersion: &defaultMinLivepeerVersion,
 
 		// Flags
 		TestOrchAvail: &defaultTestOrchAvail,
@@ -1187,6 +1190,9 @@ func StartLivepeer(ctx context.Context, cfg LivepeerConfig) {
 	}
 
 	n.Capabilities = core.NewCapabilities(transcoderCaps, core.MandatoryOCapabilities())
+	if cfg.OrchMinLivepeerVersion != nil {
+		n.Capabilities.SetMinVersionConstraint(*cfg.OrchMinLivepeerVersion)
+	}
 
 	if drivers.NodeStorage == nil {
 		// base URI will be empty for broadcasters; that's OK
