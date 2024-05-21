@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"github.com/livepeer/go-livepeer/eth"
 	"github.com/livepeer/go-livepeer/eth/blockwatch"
 	"github.com/livepeer/go-livepeer/eth/watchers"
+	"github.com/livepeer/go-livepeer/monitor"
 	lpmon "github.com/livepeer/go-livepeer/monitor"
 	"github.com/livepeer/go-livepeer/pm"
 	"github.com/livepeer/go-livepeer/server"
@@ -72,77 +74,80 @@ const (
 )
 
 type LivepeerConfig struct {
-	Network                *string
-	RtmpAddr               *string
-	CliAddr                *string
-	HttpAddr               *string
-	ServiceAddr            *string
-	OrchAddr               *string
-	VerifierURL            *string
-	EthController          *string
-	VerifierPath           *string
-	LocalVerify            *bool
-	HttpIngest             *bool
-	Orchestrator           *bool
-	Transcoder             *bool
-	Broadcaster            *bool
-	OrchSecret             *string
-	TranscodingOptions     *string
-	MaxAttempts            *int
-	SelectRandWeight       *float64
-	SelectStakeWeight      *float64
-	SelectPriceWeight      *float64
-	SelectPriceExpFactor   *float64
-	OrchPerfStatsURL       *string
-	Region                 *string
-	MaxPricePerUnit        *int
-	MinPerfScore           *float64
-	MaxSessions            *string
-	CurrentManifest        *bool
-	Nvidia                 *string
-	Netint                 *string
-	TestTranscoder         *bool
-	EthAcctAddr            *string
-	EthPassword            *string
-	EthKeystorePath        *string
-	EthOrchAddr            *string
-	EthUrl                 *string
-	TxTimeout              *time.Duration
-	MaxTxReplacements      *int
-	GasLimit               *int
-	MinGasPrice            *int64
-	MaxGasPrice            *int
-	InitializeRound        *bool
-	TicketEV               *string
-	MaxFaceValue           *string
-	MaxTicketEV            *string
-	MaxTotalEV             *string
-	DepositMultiplier      *int
-	PricePerUnit           *int
-	PixelsPerUnit          *int
-	AutoAdjustPrice        *bool
-	PricePerBroadcaster    *string
-	BlockPollingInterval   *int
-	Redeemer               *bool
-	RedeemerAddr           *string
-	Reward                 *bool
-	Monitor                *bool
-	MetricsPerStream       *bool
-	MetricsExposeClientIP  *bool
-	MetadataQueueUri       *string
-	MetadataAmqpExchange   *string
-	MetadataPublishTimeout *time.Duration
-	Datadir                *string
-	Objectstore            *string
-	Recordstore            *string
-	FVfailGsBucket         *string
-	FVfailGsKey            *string
-	AuthWebhookURL         *string
-	OrchWebhookURL         *string
-	OrchBlacklist          *string
-	TestOrchAvail          *bool
-	PublicTPool            *bool
-	PoolCommission         *int
+	Network                 *string
+	RtmpAddr                *string
+	CliAddr                 *string
+	HttpAddr                *string
+	ServiceAddr             *string
+	OrchAddr                *string
+	VerifierURL             *string
+	EthController           *string
+	VerifierPath            *string
+	LocalVerify             *bool
+	HttpIngest              *bool
+	Orchestrator            *bool
+	Transcoder              *bool
+	Broadcaster             *bool
+	OrchSecret              *string
+	TranscodingOptions      *string
+	MaxAttempts             *int
+	SelectRandWeight        *float64
+	SelectStakeWeight       *float64
+	SelectPriceWeight       *float64
+	SelectPriceExpFactor    *float64
+	OrchPerfStatsURL        *string
+	Region                  *string
+	MaxPricePerUnit         *string
+	MinPerfScore            *float64
+	MaxSessions             *string
+	CurrentManifest         *bool
+	Nvidia                  *string
+	Netint                  *string
+	TestTranscoder          *bool
+	EthAcctAddr             *string
+	EthPassword             *string
+	EthKeystorePath         *string
+	EthOrchAddr             *string
+	EthUrl                  *string
+	TxTimeout               *time.Duration
+	MaxTxReplacements       *int
+	GasLimit                *int
+	MinGasPrice             *int64
+	MaxGasPrice             *int
+	InitializeRound         *bool
+	InitializeRoundMaxDelay *time.Duration
+	TicketEV                *string
+	MaxFaceValue            *string
+	MaxTicketEV             *string
+	MaxTotalEV              *string
+	DepositMultiplier       *int
+	PricePerUnit            *string
+	PixelsPerUnit           *string
+	PriceFeedAddr           *string
+	AutoAdjustPrice         *bool
+	PricePerBroadcaster     *string
+	BlockPollingInterval    *int
+	Redeemer                *bool
+	RedeemerAddr            *string
+	Reward                  *bool
+	Monitor                 *bool
+	MetricsPerStream        *bool
+	MetricsExposeClientIP   *bool
+	MetadataQueueUri        *string
+	MetadataAmqpExchange    *string
+	MetadataPublishTimeout  *time.Duration
+	Datadir                 *string
+	Objectstore             *string
+	Recordstore             *string
+	FVfailGsBucket          *string
+	FVfailGsKey             *string
+	AuthWebhookURL          *string
+	OrchWebhookURL          *string
+	OrchBlacklist           *string
+	OrchMinLivepeerVersion  *string
+	TestOrchAvail           *bool
+	PublicTPool             *bool
+	PoolCommission          *int
 }
 
 // DefaultLivepeerConfig creates LivepeerConfig exactly the same as when no flags are passed to the livepeer process.
@@ -189,13 +194,15 @@ func DefaultLivepeerConfig() LivepeerConfig {
 	defaultMaxGasPrice := 0
 	defaultEthController := ""
 	defaultInitializeRound := false
+	defaultInitializeRoundMaxDelay := 30 * time.Second
 	defaultTicketEV := "8000000000"
 	defaultMaxFaceValue := "0"
 	defaultMaxTicketEV := "3000000000000"
 	defaultMaxTotalEV := "20000000000000"
 	defaultDepositMultiplier := 1
-	defaultMaxPricePerUnit := 0
-	defaultPixelsPerUnit := 1
+	defaultMaxPricePerUnit := "0"
+	defaultPixelsPerUnit := "1"
+	defaultPriceFeedAddr := "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612" // ETH / USD price feed address on Arbitrum Mainnet
 	defaultAutoAdjustPrice := true
 	defaultPricePerBroadcaster := ""
 	defaultBlockPollingInterval := 5
@@ -226,6 +233,7 @@ func DefaultLivepeerConfig() LivepeerConfig {
 	// API
 	defaultAuthWebhookURL := ""
 	defaultOrchWebhookURL := ""
+	defaultMinLivepeerVersion := ""
 
 	// Flags
 	defaultTestOrchAvail := true
@@ -266,35 +274,37 @@ func DefaultLivepeerConfig() LivepeerConfig {
 		TestTranscoder:       &defaultTestTranscoder,
 
 		// Onchain:
-		EthAcctAddr:            &defaultEthAcctAddr,
-		EthPassword:            &defaultEthPassword,
-		EthKeystorePath:        &defaultEthKeystorePath,
-		EthOrchAddr:            &defaultEthOrchAddr,
-		EthUrl:                 &defaultEthUrl,
-		TxTimeout:              &defaultTxTimeout,
-		MaxTxReplacements:      &defaultMaxTxReplacements,
-		GasLimit:               &defaultGasLimit,
-		MaxGasPrice:            &defaultMaxGasPrice,
-		EthController:          &defaultEthController,
-		InitializeRound:        &defaultInitializeRound,
-		TicketEV:               &defaultTicketEV,
-		MaxFaceValue:           &defaultMaxFaceValue,
-		MaxTicketEV:            &defaultMaxTicketEV,
-		MaxTotalEV:             &defaultMaxTotalEV,
-		DepositMultiplier:      &defaultDepositMultiplier,
-		MaxPricePerUnit:        &defaultMaxPricePerUnit,
-		PixelsPerUnit:          &defaultPixelsPerUnit,
-		AutoAdjustPrice:        &defaultAutoAdjustPrice,
-		PricePerBroadcaster:    &defaultPricePerBroadcaster,
-		BlockPollingInterval:   &defaultBlockPollingInterval,
-		Redeemer:               &defaultRedeemer,
-		RedeemerAddr:           &defaultRedeemerAddr,
-		Monitor:                &defaultMonitor,
-		MetricsPerStream:       &defaultMetricsPerStream,
-		MetricsExposeClientIP:  &defaultMetricsExposeClientIP,
-		MetadataQueueUri:       &defaultMetadataQueueUri,
-		MetadataAmqpExchange:   &defaultMetadataAmqpExchange,
-		MetadataPublishTimeout: &defaultMetadataPublishTimeout,
+		EthAcctAddr:             &defaultEthAcctAddr,
+		EthPassword:             &defaultEthPassword,
+		EthKeystorePath:         &defaultEthKeystorePath,
+		EthOrchAddr:             &defaultEthOrchAddr,
+		EthUrl:                  &defaultEthUrl,
+		TxTimeout:               &defaultTxTimeout,
+		MaxTxReplacements:       &defaultMaxTxReplacements,
+		GasLimit:                &defaultGasLimit,
+		MaxGasPrice:             &defaultMaxGasPrice,
+		EthController:           &defaultEthController,
+		InitializeRound:         &defaultInitializeRound,
+		InitializeRoundMaxDelay: &defaultInitializeRoundMaxDelay,
+		TicketEV:                &defaultTicketEV,
+		MaxFaceValue:            &defaultMaxFaceValue,
+		MaxTicketEV:             &defaultMaxTicketEV,
+		MaxTotalEV:              &defaultMaxTotalEV,
+		DepositMultiplier:       &defaultDepositMultiplier,
+		MaxPricePerUnit:         &defaultMaxPricePerUnit,
+		PixelsPerUnit:           &defaultPixelsPerUnit,
+		PriceFeedAddr:           &defaultPriceFeedAddr,
+		AutoAdjustPrice:         &defaultAutoAdjustPrice,
+		PricePerBroadcaster:     &defaultPricePerBroadcaster,
+		BlockPollingInterval:    &defaultBlockPollingInterval,
+		Redeemer:                &defaultRedeemer,
+		RedeemerAddr:            &defaultRedeemerAddr,
+		Monitor:                 &defaultMonitor,
+		MetricsPerStream:        &defaultMetricsPerStream,
+		MetricsExposeClientIP:   &defaultMetricsExposeClientIP,
+		MetadataQueueUri:        &defaultMetadataQueueUri,
+		MetadataAmqpExchange:    &defaultMetadataAmqpExchange,
+		MetadataPublishTimeout:  &defaultMetadataPublishTimeout,
 
 		// Ingest:
 		HttpIngest: &defaultHttpIngest,
@@ -312,8 +322,9 @@ func DefaultLivepeerConfig() LivepeerConfig {
 		FVfailGsKey:    &defaultFVfailGsKey,
 
 		// API
-		AuthWebhookURL: &defaultAuthWebhookURL,
-		OrchWebhookURL: &defaultOrchWebhookURL,
+		AuthWebhookURL:         &defaultAuthWebhookURL,
+		OrchWebhookURL:         &defaultOrchWebhookURL,
+		OrchMinLivepeerVersion: &defaultMinLivepeerVersion,
 
 		// Flags
 		TestOrchAvail: &defaultTestOrchAvail,
@@ -722,6 +733,13 @@ func StartLivepeer(ctx context.Context, cfg LivepeerConfig) {
 		go serviceRegistryWatcher.Watch()
 		defer serviceRegistryWatcher.Stop()
 
+		core.PriceFeedWatcher, err = watchers.NewPriceFeedWatcher(backend, *cfg.PriceFeedAddr)
+		// The price feed watch loop is started on demand on first subscribe.
+		if err != nil {
+			glog.Errorf("Failed to set up price feed watcher: %v", err)
+			return
+		}
+
 		n.Balances = core.NewAddressBalances(cleanupInterval)
 		defer n.Balances.StopCleanup()
 
@@ -743,27 +761,44 @@ func StartLivepeer(ctx context.Context, cfg LivepeerConfig) {
 
 		if *cfg.Orchestrator {
 			// Set price per pixel base info
-			if *cfg.PixelsPerUnit <= 0 {
+			pixelsPerUnit, ok := new(big.Rat).SetString(*cfg.PixelsPerUnit)
+			if !ok || !pixelsPerUnit.IsInt() {
+				panic(fmt.Errorf("-pixelsPerUnit must be a valid integer, provided %v", *cfg.PixelsPerUnit))
+			}
+			if pixelsPerUnit.Sign() <= 0 {
 				// Can't divide by 0
-				panic(fmt.Errorf("-pixelsPerUnit must be > 0, provided %d", *cfg.PixelsPerUnit))
+				panic(fmt.Errorf("-pixelsPerUnit must be > 0, provided %v", *cfg.PixelsPerUnit))
 			}
 			if cfg.PricePerUnit == nil {
 				// Prevent orchestrators from unknowingly providing free transcoding
 				panic(fmt.Errorf("-pricePerUnit must be set"))
 			}
-			if *cfg.PricePerUnit < 0 {
-				panic(fmt.Errorf("-pricePerUnit must be >= 0, provided %d", *cfg.PricePerUnit))
+			pricePerUnit, currency, err := parsePricePerUnit(*cfg.PricePerUnit)
+			if err != nil {
+				panic(fmt.Errorf("-pricePerUnit must be a valid integer with an optional currency, provided %v", *cfg.PricePerUnit))
+			} else if pricePerUnit.Sign() < 0 {
+				panic(fmt.Errorf("-pricePerUnit must be >= 0, provided %s", pricePerUnit))
 			}
-			n.SetBasePrice("default", big.NewRat(int64(*cfg.PricePerUnit), int64(*cfg.PixelsPerUnit)))
-			glog.Infof("Price: %d wei for %d pixels\n ", *cfg.PricePerUnit, *cfg.PixelsPerUnit)
+			pricePerPixel := new(big.Rat).Quo(pricePerUnit, pixelsPerUnit)
+			autoPrice, err := core.NewAutoConvertedPrice(currency, pricePerPixel, func(price *big.Rat) {
+				glog.Infof("Price: %v wei per pixel\n ", price.FloatString(3))
+			})
+			if err != nil {
+				panic(fmt.Errorf("Error converting price: %v", err))
+			}
+			n.SetBasePrice("default", autoPrice)
 
-			if *cfg.PricePerBroadcaster != "" {
-				ppb := getBroadcasterPrices(*cfg.PricePerBroadcaster)
-				for _, p := range ppb {
-					price := big.NewRat(p.PricePerUnit, p.PixelsPerUnit)
-					n.SetBasePrice(p.EthAddress, price)
-					glog.Infof("Price: %v set for broadcaster %v", price.RatString(), p.EthAddress)
+			broadcasterPrices := getBroadcasterPrices(*cfg.PricePerBroadcaster)
+			for _, p := range broadcasterPrices {
+				p := p
+				pricePerPixel := new(big.Rat).Quo(p.PricePerUnit, p.PixelsPerUnit)
+				autoPrice, err := core.NewAutoConvertedPrice(p.Currency, pricePerPixel, func(price *big.Rat) {
+					glog.Infof("Price: %v wei per pixel for broadcaster %v", price.FloatString(3), p.EthAddress)
+				})
+				if err != nil {
+					panic(fmt.Errorf("Error converting price for broadcaster %s: %v", p.EthAddress, err))
 				}
+				n.SetBasePrice(p.EthAddress, autoPrice)
 			}
 
 			n.AutoSessionLimit = *cfg.MaxSessions == "auto"
@@ -868,12 +903,30 @@ func StartLivepeer(ctx context.Context, cfg LivepeerConfig) {
 
 			n.Sender = pm.NewSender(n.Eth, timeWatcher, senderWatcher, maxEV, maxTotalEV, *cfg.DepositMultiplier)
 
-			if *cfg.PixelsPerUnit <= 0 {
-				// Can't divide by 0
-				panic(fmt.Errorf("The amount of pixels per unit must be greater than 0, provided %d instead\n", *cfg.PixelsPerUnit))
+			pixelsPerUnit, ok := new(big.Rat).SetString(*cfg.PixelsPerUnit)
+			if !ok || !pixelsPerUnit.IsInt() {
+				panic(fmt.Errorf("-pixelsPerUnit must be a valid integer, provided %v", *cfg.PixelsPerUnit))
 			}
-			if *cfg.MaxPricePerUnit > 0 {
-				server.BroadcastCfg.SetMaxPrice(big.NewRat(int64(*cfg.MaxPricePerUnit), int64(*cfg.PixelsPerUnit)))
+			if pixelsPerUnit.Sign() <= 0 {
+				// Can't divide by 0
+				panic(fmt.Errorf("-pixelsPerUnit must be > 0, provided %v", *cfg.PixelsPerUnit))
+			}
+			maxPricePerUnit, currency, err := parsePricePerUnit(*cfg.MaxPricePerUnit)
+			if err != nil {
+				panic(fmt.Errorf("The maximum price per unit must be a valid integer with an optional currency, provided %v instead\n", *cfg.MaxPricePerUnit))
+			}
+			if maxPricePerUnit.Sign() > 0 {
+				pricePerPixel := new(big.Rat).Quo(maxPricePerUnit, pixelsPerUnit)
+				autoPrice, err := core.NewAutoConvertedPrice(currency, pricePerPixel, func(price *big.Rat) {
+					if monitor.Enabled {
+						monitor.MaxTranscodingPrice(price)
+					}
+					glog.Infof("Maximum transcoding price: %v wei per pixel\n ", price.FloatString(3))
+				})
+				if err != nil {
+					panic(fmt.Errorf("Error converting price: %v", err))
+				}
+				server.BroadcastCfg.SetMaxPrice(autoPrice)
 			} else {
 				glog.Infof("Maximum transcoding price per pixel is not greater than 0: %v, broadcaster is currently set to accept ANY price.\n", *cfg.MaxPricePerUnit)
 				glog.Infoln("To update the broadcaster's maximum acceptable transcoding price per pixel, use the CLI or restart the broadcaster with the appropriate 'maxPricePerUnit' and 'pixelsPerUnit' values")
@@ -946,7 +999,7 @@ func StartLivepeer(ctx context.Context, cfg LivepeerConfig) {
 		if *cfg.InitializeRound {
 			// Start round initializer
 			// The node will only initialize rounds if it in the upcoming active set for the round
-			initializer := eth.NewRoundInitializer(n.Eth, timeWatcher)
+			initializer := eth.NewRoundInitializer(n.Eth, timeWatcher, *cfg.InitializeRoundMaxDelay)
 			go func() {
 				if err := initializer.Start(); err != nil {
 					serviceErr <- err
@@ -1137,6 +1190,9 @@ func StartLivepeer(ctx context.Context, cfg LivepeerConfig) {
 	}
 
 	n.Capabilities = core.NewCapabilities(transcoderCaps, core.MandatoryOCapabilities())
+	if cfg.OrchMinLivepeerVersion != nil {
+		n.Capabilities.SetMinVersionConstraint(*cfg.OrchMinLivepeerVersion)
+	}
 
 	if drivers.NodeStorage == nil {
 		// base URI will be empty for broadcasters; that's OK
@@ -1439,30 +1495,59 @@ func checkOrStoreChainID(dbh *common.DB, chainID *big.Int) error {
 	return nil
 }
 
-// Format of broadcasterPrices json
-// {"broadcasters":[{"ethaddress":"address1","priceperunit":1000,"pixelsperunit":1}, {"ethaddress":"address2","priceperunit":2000,"pixelsperunit":3}]}
-type BroadcasterPrices struct {
-	Prices []BroadcasterPrice `json:"broadcasters"`
-}
-
 type BroadcasterPrice struct {
-	EthAddress    string `json:"ethaddress"`
-	PricePerUnit  int64  `json:"priceperunit"`
-	PixelsPerUnit int64  `json:"pixelsperunit"`
+	EthAddress    string
+	PricePerUnit  *big.Rat
+	Currency      string
+	PixelsPerUnit *big.Rat
 }
 
 func getBroadcasterPrices(broadcasterPrices string) []BroadcasterPrice {
-	var pricesSet BroadcasterPrices
-	prices, _ := common.ReadFromFile(broadcasterPrices)
-
-	err := json.Unmarshal([]byte(prices), &pricesSet)
-
-	if err != nil {
-		glog.Errorf("broadcaster prices could not be parsed")
+	if broadcasterPrices == "" {
 		return nil
 	}
 
-	return pricesSet.Prices
+	// Format of broadcasterPrices json
+	// {"broadcasters":[{"ethaddress":"address1","priceperunit":0.5,"currency":"USD","pixelsperunit":1}, {"ethaddress":"address2","priceperunit":0.3,"currency":"USD","pixelsperunit":3}]}
+	var pricesSet struct {
+		Broadcasters []struct {
+			EthAddress string `json:"ethaddress"`
+			// The fields below are specified as a number in the JSON, but we don't want to lose precision so we store the raw characters here and parse as a big.Rat.
+			// This also allows support for exponential notation for numbers, which is helpful for pricePerUnit which could be a value like 1e12.
+			PixelsPerUnit json.RawMessage `json:"pixelsperunit"`
+			PricePerUnit  json.RawMessage `json:"priceperunit"`
+			Currency      string          `json:"currency"`
+		} `json:"broadcasters"`
+	}
+	pricesFileContent, _ := common.ReadFromFile(broadcasterPrices)
+
+	err := json.Unmarshal([]byte(pricesFileContent), &pricesSet)
+	if err != nil {
+		glog.Errorf("broadcaster prices could not be parsed: %s", err)
+		return nil
+	}
+
+	prices := make([]BroadcasterPrice, len(pricesSet.Broadcasters))
+	for i, p := range pricesSet.Broadcasters {
+		pixelsPerUnit, ok := new(big.Rat).SetString(string(p.PixelsPerUnit))
+		if !ok {
+			glog.Errorf("Pixels per unit could not be parsed for broadcaster %v. must be a valid number, provided %s", p.EthAddress, p.PixelsPerUnit)
+			continue
+		}
+		pricePerUnit, ok := new(big.Rat).SetString(string(p.PricePerUnit))
+		if !ok {
+			glog.Errorf("Price per unit could not be parsed for broadcaster %v. must be a valid number, provided %s", p.EthAddress, p.PricePerUnit)
+			continue
+		}
+		prices[i] = BroadcasterPrice{
+			EthAddress:    p.EthAddress,
+			Currency:      p.Currency,
+			PricePerUnit:  pricePerUnit,
+			PixelsPerUnit: pixelsPerUnit,
+		}
+	}
+
+	return prices
 }
 
 func createSelectionAlgorithm(cfg LivepeerConfig) (common.SelectionAlgorithm, error) {
@@ -1512,6 +1597,22 @@ func parseEthKeystorePath(ethKeystorePath string) (keystorePath, error) {
 		}
 	}
 	return keystore, nil
+}
+
+func parsePricePerUnit(pricePerUnitStr string) (*big.Rat, string, error) {
+	pricePerUnitRex := regexp.MustCompile(`^(\d+(\.\d+)?)([A-z][A-z0-9]*)?$`)
+	match := pricePerUnitRex.FindStringSubmatch(pricePerUnitStr)
+	if match == nil {
+		return nil, "", fmt.Errorf("price must be in the format of <price><currency>, provided %v", pricePerUnitStr)
+	}
+	price, currency := match[1], match[3]
+
+	pricePerUnit, ok := new(big.Rat).SetString(price)
+	if !ok {
+		return nil, "", fmt.Errorf("price must be a valid number, provided %v", match[1])
+	}
+
+	return pricePerUnit, currency, nil
 }
 
 func refreshOrchPerfScoreLoop(ctx context.Context, region string, orchPerfScoreURL string, score *common.PerfScore) {

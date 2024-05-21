@@ -130,8 +130,8 @@ curl -X PUT -T "${FILE}" \
 
 echo "upload done"
 
-curl -X POST --fail -s \
-  -H "Content-Type: application/json" \
-  -d "{\"content\": \"Build succeeded ✅\nBranch: $BRANCH\nPlatform: $PLATFORM-$ARCH\nLast commit: $(git log -1 --pretty=format:'%s by %an')\nhttps://build.livepeer.live/${BUCKET_PATH}\nSHA256:\n${FILE_SHA256}\"}" \
-  $DISCORD_URL
+# curl -X POST --fail -s \
+#   -H "Content-Type: application/json" \
+#   -d "{\"content\": \"Build succeeded ✅\nBranch: $BRANCH\nPlatform: $PLATFORM-$ARCH\nLast commit: $(git log -1 --pretty=format:'%s by %an')\nhttps://build.livepeer.live/${BUCKET_PATH}\nSHA256:\n${FILE_SHA256}\"}" \
+#   $DISCORD_URL
 echo "done"

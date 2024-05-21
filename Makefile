@@ -2,6 +2,10 @@ SHELL=/bin/bash
 GO_BUILD_DIR?="./"
 
 all: net/lp_rpc.pb.go net/redeemer.pb.go net/redeemer_mock.pb.go core/test_segment.go livepeer livepool livepeer_cli livepeer_router livepeer_bench
+MOCKGEN=go run github.com/golang/mock/mockgen
+ABIGEN=go run github.com/ethereum/go-ethereum/cmd/abigen
+
+all: net/lp_rpc.pb.go net/redeemer.pb.go net/redeemer_mock.pb.go core/test_segment.go eth/contracts/chainlink/AggregatorV3Interface.go livepeer livepeer_cli livepeer_router livepeer_bench
 
 net/lp_rpc.pb.go: net/lp_rpc.proto
 	protoc -I=. --go_out=. --go-grpc_out=. $^
@@ -10,11 +14,20 @@ net/redeemer.pb.go: net/redeemer.proto
 	protoc -I=. --go_out=. --go-grpc_out=. $^
 
 net/redeemer_mock.pb.go net/redeemer_grpc_mock.pb.go: net/redeemer.pb.go net/redeemer_grpc.pb.go
-	@mockgen -source net/redeemer.pb.go -destination net/redeemer_mock.pb.go -package net
-	@mockgen -source net/redeemer_grpc.pb.go -destination net/redeemer_grpc_mock.pb.go -package net
+	@$(MOCKGEN) -source net/redeemer.pb.go -destination net/redeemer_mock.pb.go -package net
+	@$(MOCKGEN) -source net/redeemer_grpc.pb.go -destination net/redeemer_grpc_mock.pb.go -package net
 
 core/test_segment.go:
 	core/test_segment.sh core/test_segment.go
+
+eth/contracts/chainlink/AggregatorV3Interface.go:
+	solc --version | grep 0.7.6+commit.7338295f
+	@set -ex; \
+	for sol_file in eth/contracts/chainlink/*.sol; do \
+		contract_name=$$(basename "$$sol_file" .sol); \
+		solc --abi --optimize --overwrite -o $$(dirname "$$sol_file") $$sol_file; \
+		$(ABIGEN) --abi=$${sol_file%.sol}.abi --pkg=chainlink --type=$$contract_name --out=$${sol_file%.sol}.go; \
+	done
 
 version=$(shell cat VERSION)
 
@@ -90,7 +103,7 @@ livepeer:
 
 .PHONY: livepool
 livepool:
-	GO111MODULE=on CGO_ENABLED=1 CGO_LDFLAGS="$(cgo_ldflags)" go build -tags "$(HIGHEST_CHAIN_TAG)" -ldflags="$(ldflags)" cmd/livepool/*.go
+	GO111MODULE=on CGO_ENABLED=1 CC="$(cc)" CGO_CFLAGS="$(cgo_cflags)" CGO_LDFLAGS="$(cgo_ldflags) ${CGO_LDFLAGS}" go build -tags "$(HIGHEST_CHAIN_TAG)" -ldflags="$(ldflags)" cmd/livepool/*.go
 
 .PHONY: livepeer_cli
 livepeer_cli:

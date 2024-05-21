@@ -56,7 +56,7 @@ var submitMultiSession = func(ctx context.Context, sess *BroadcastSession, seg *
 var maxTranscodeAttempts = errors.New("hit max transcode attempts")
 
 type BroadcastConfig struct {
-	maxPrice *big.Rat
+	maxPrice *core.AutoConvertedPrice
 	mu       sync.RWMutex
 }
 
@@ -68,16 +68,19 @@ type SegFlightMetadata struct {
 func (cfg *BroadcastConfig) MaxPrice() *big.Rat {
 	cfg.mu.RLock()
 	defer cfg.mu.RUnlock()
-	return cfg.maxPrice
+	if cfg.maxPrice == nil {
+		return nil
+	}
+	return cfg.maxPrice.Value()
 }
 
-func (cfg *BroadcastConfig) SetMaxPrice(price *big.Rat) {
+func (cfg *BroadcastConfig) SetMaxPrice(price *core.AutoConvertedPrice) {
 	cfg.mu.Lock()
 	defer cfg.mu.Unlock()
+	prevPrice := cfg.maxPrice
 	cfg.maxPrice = price
-
-	if monitor.Enabled {
-		monitor.MaxTranscodingPrice(price)
+	if prevPrice != nil {
+		prevPrice.Stop()
 	}
 }
 
@@ -445,6 +448,9 @@ func (bsm *BroadcastSessionsManager) shouldSkipVerification(sessions []*Broadcas
 }
 
 func NewSessionManager(ctx context.Context, node *core.LivepeerNode, params *core.StreamParameters, sel BroadcastSessionsSelectorFactory) *BroadcastSessionsManager {
+	if node.Capabilities != nil {
+		params.Capabilities.SetMinVersionConstraint(node.Capabilities.MinVersionConstraint())
+	}
 	var trustedPoolSize, untrustedPoolSize float64
 	if node.OrchestratorPool != nil {
 		trustedPoolSize = float64(node.OrchestratorPool.SizeWith(common.ScoreAtLeast(common.Score_Trusted)))
