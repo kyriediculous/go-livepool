@@ -218,17 +218,17 @@ jobs:
           text: ${{ github.ref_name }}
           regex: '^(master|main|v[0-9]+\.\d+\.\d+)$'
 
-      - name: Codesign and notarize binaries
-        if: steps.match-tag.outputs.match != '' && matrix.target.GOOS == 'darwin'
-        uses: livepeer/action-gh-codesign-apple@latest
-        with:
-          developer-certificate-id: ${{ secrets.CI_MACOS_CERTIFICATE_ID }}
-          developer-certificate-base64: ${{ secrets.CI_MACOS_CERTIFICATE_BASE64 }}
-          developer-certificate-password: ${{ secrets.CI_MACOS_CERTIFICATE_PASSWORD }}
-          app-notarization-email: ${{ secrets.CI_MACOS_NOTARIZATION_USER }}
-          app-notarization-password: ${{ secrets.CI_MACOS_NOTARIZATION_PASSWORD }}
-          app-notarization-team-id: ${{ secrets.CI_MACOS_NOTARIZATION_TEAM_ID }}
-          binary-path: "lp-builds/"
+      # - name: Codesign and notarize binaries
+      #   if: steps.match-tag.outputs.match != '' && matrix.target.GOOS == 'darwin'
+      #   uses: livepeer/action-gh-codesign-apple@latest
+      #   with:
+      #     developer-certificate-id: ${{ secrets.CI_MACOS_CERTIFICATE_ID }}
+      #     developer-certificate-base64: ${{ secrets.CI_MACOS_CERTIFICATE_BASE64 }}
+      #     developer-certificate-password: ${{ secrets.CI_MACOS_CERTIFICATE_PASSWORD }}
+      #     app-notarization-email: ${{ secrets.CI_MACOS_NOTARIZATION_USER }}
+      #     app-notarization-password: ${{ secrets.CI_MACOS_NOTARIZATION_PASSWORD }}
+      #     app-notarization-team-id: ${{ secrets.CI_MACOS_NOTARIZATION_TEAM_ID }}
+      #     binary-path: "lp-builds/"
 
       - name: Upload build
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
