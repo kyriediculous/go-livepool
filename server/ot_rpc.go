@@ -344,7 +344,7 @@ func (h *lphttp) RegisterTranscoder(req *net.RegisterRequest, stream net.Transco
 	}
 	// handle case of legacy Transcoder which do not advertise capabilities
 	if req.Capabilities == nil {
-		req.Capabilities = core.NewCapabilities(core.DefaultCapabilities(), nil).ToNetCapabilities()
+		return errCapabilities
 	}
 
 	if req.EthereumAddress == nil {
