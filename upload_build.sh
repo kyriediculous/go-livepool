@@ -73,17 +73,13 @@ for networkBranch in $NETWORK_BRANCHES; do
   fi
 done
 
-NODE="./livepeer${EXT}"
-CLI="./livepeer_cli${EXT}"
-BENCH="./livepeer_bench${EXT}"
-ROUTER="./livepeer_router${EXT}"
 POOL="./livepool${EXT}"
 
 mkdir -p "${BASE_DIR}/$BASE"
 
 # Optionally step into build directory, if set anywhere
 cd "${GO_BUILD_DIR:-./}"
-cp "$NODE" "$CLI" "$BENCH" "$ROUTER" "${BASE_DIR}/$BASE"
+cp "$POOL" "${BASE_DIR}/$BASE"
 cd -
 
 # do a basic upload so we know if stuff's working prior to doing everything else
