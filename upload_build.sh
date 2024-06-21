@@ -49,7 +49,7 @@ if [[ "$ARCH" != "amd64" ]] && [[ "$ARCH" != "arm64" ]]; then
   exit 1
 fi
 
-BASE="livepeer-$PLATFORM-$ARCH"
+BASE="livepool-$PLATFORM-$ARCH"
 BRANCH="${TRAVIS_BRANCH:-unknown}"
 if [[ "${GHA_REF:-}" != "" ]]; then
   BRANCH="$(echo $GHA_REF | sed 's:refs/heads/::')"
